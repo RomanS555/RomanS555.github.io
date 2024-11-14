@@ -18045,6 +18045,7 @@ cr.getObjectRefTable = function () { return [
 	cr.system_object.prototype.exps.str,
 	cr.behaviors.EightDir.prototype.cnds.IsMoving,
 	cr.system_object.prototype.cnds.Every,
+	cr.system_object.prototype.cnds.Else,
 	cr.system_object.prototype.exps["int"],
 	cr.system_object.prototype.exps.tokenat,
 	cr.plugins_.Photon.prototype.exps.EventData,
