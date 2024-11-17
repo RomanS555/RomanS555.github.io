@@ -20111,13 +20111,14 @@ cr.getObjectRefTable = function () { return [
 	cr.behaviors.Bullet,
 	cr.system_object.prototype.cnds.IsGroupActive,
 	cr.system_object.prototype.cnds.OnLayoutStart,
+	cr.plugins_.Sprite.prototype.acts.Destroy,
+	cr.plugins_.Text.prototype.acts.Destroy,
 	cr.plugins_.Photon.prototype.acts.connect,
 	cr.plugins_.Photon.prototype.cnds.onJoinedLobby,
 	cr.plugins_.Photon.prototype.acts.joinRandomOrCreateRoom,
 	cr.plugins_.Photon.prototype.cnds.onActorLeave,
 	cr.plugins_.Sprite.prototype.cnds.CompareInstanceVar,
 	cr.plugins_.Photon.prototype.exps.ActorNr,
-	cr.plugins_.Sprite.prototype.acts.Destroy,
 	cr.plugins_.Photon.prototype.cnds.onJoinRoom,
 	cr.plugins_.Photon.prototype.acts.raiseEvent,
 	cr.plugins_.Photon.prototype.exps.MyActorNr,
@@ -20169,6 +20170,5 @@ cr.getObjectRefTable = function () { return [
 	cr.plugins_.Sprite.prototype.acts.SetVisible,
 	cr.plugins_.Text.prototype.acts.SetVisible,
 	cr.plugins_.progressbar.prototype.acts.SetVisible,
-	cr.plugins_.Text.prototype.acts.Destroy,
 	cr.plugins_.Sprite.prototype.cnds.OnCreated
 ];};
