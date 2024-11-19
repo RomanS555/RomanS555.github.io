@@ -15499,6 +15499,158 @@ cr.plugins_.Button = function(runtime)
 }());
 ;
 ;
+cr.plugins_.C2WebSocket = function(runtime)
+{
+	this.runtime = runtime;
+};
+(function ()
+{
+	var pluginProto = cr.plugins_.C2WebSocket.prototype;
+	pluginProto.Type = function(plugin)
+	{
+		this.plugin = plugin;
+		this.runtime = plugin.runtime;
+	};
+	var typeProto = pluginProto.Type.prototype;
+	typeProto.onCreate = function()
+	{
+	};
+	pluginProto.Instance = function(type)
+	{
+		this.type = type;
+		this.runtime = type.runtime;
+	};
+	var instanceProto = pluginProto.Instance.prototype;
+	var isSupported = (typeof WebSocket !== "undefined");
+	var last_url = "";
+	instanceProto.onCreate = function()
+	{
+		this.ws = null;
+		this.messageText = "";
+		this.errorMsg = "";
+		this.closeCode = 0;
+		this.closeReason = "";
+	};
+	instanceProto.saveToJSON = function ()
+	{
+		return { "messageText": this.messageText, "errorMsg": this.errorMsg };
+	};
+	instanceProto.loadFromJSON = function (o)
+	{
+		this.messageText = o["messageText"];
+		this.errorMsg = o["errorMsg"];
+	};
+	function Cnds() {};
+	Cnds.prototype.OnOpened = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnClosed = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnError = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnMessage = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.IsOpen = function ()
+	{
+		return this.ws && this.ws.readyState === 1 /* OPEN */;
+	};
+	Cnds.prototype.IsConnecting = function ()
+	{
+		return this.ws && this.ws.readyState === 0 /* CONNECTING */;
+	};
+	Cnds.prototype.IsSupported = function ()
+	{
+		return isSupported;
+	};
+	pluginProto.cnds = new Cnds();
+	function Acts() {};
+	Acts.prototype.Connect = function (url_, requireProtocol_)
+	{
+		if (!isSupported)
+			return;
+		if (this.ws)
+			this.ws.close();
+		var self = this;
+		last_url = url_;
+		try {
+			if (requireProtocol_ === "")
+				this.ws = new WebSocket(url_);
+			else
+				this.ws = new WebSocket(url_, requireProtocol_);
+		}
+		catch (e) {
+			this.ws = null;
+			self.errorMsg = "Unable to create a WebSocket with the given address and protocol.";
+			self.runtime.trigger(cr.plugins_.C2WebSocket.prototype.cnds.OnError, self);
+			return;
+		}
+		this.ws.binaryType = "arraybuffer";
+		this.ws.onopen = function() {
+			if (requireProtocol_.length && self.ws.protocol.indexOf(requireProtocol_) === -1)
+			{
+				self.errorMsg = "WebSocket required protocol '" + requireProtocol_ + "' not supported by server";
+				self.runtime.trigger(cr.plugins_.C2WebSocket.prototype.cnds.OnError, self);
+			}
+			else
+				self.runtime.trigger(cr.plugins_.C2WebSocket.prototype.cnds.OnOpened, self);
+		};
+		this.ws.onerror = function (err_) {
+			if (cr.is_string(err_))
+				self.errorMsg = err_;
+			else
+				self.errorMsg = (err_ && cr.is_string(err_.data) ? err_.data : "");
+			self.runtime.trigger(cr.plugins_.C2WebSocket.prototype.cnds.OnError, self);
+		};
+		this.ws.onclose = function (e) {
+			self.closeCode = e["code"] || 0;
+			self.closeReason = e["reason"] || "";
+			self.runtime.trigger(cr.plugins_.C2WebSocket.prototype.cnds.OnClosed, self);
+		};
+		this.ws.onmessage = function (msg_) {
+			self.messageText = msg_.data || "";
+			self.runtime.trigger(cr.plugins_.C2WebSocket.prototype.cnds.OnMessage, self);
+		};
+	};
+	Acts.prototype.Close = function ()
+	{
+		if (this.ws)
+			this.ws.close();
+	};
+	Acts.prototype.Send = function (msg_)
+	{
+		if (!this.ws || this.ws.readyState !== 1 /* OPEN */)
+			return;
+		this.ws.send(msg_);
+	};
+	pluginProto.acts = new Acts();
+	function Exps() {};
+	Exps.prototype.MessageText = function (ret)
+	{
+		ret.set_string(this.messageText);
+	};
+	Exps.prototype.ErrorMsg = function (ret)
+	{
+		ret.set_string(cr.is_string(this.errorMsg) ? this.errorMsg : "");
+	};
+	Exps.prototype.CloseCode = function (ret)
+	{
+		ret.set_int(this.closeCode);
+	};
+	Exps.prototype.CloseReason = function (ret)
+	{
+		ret.set_string(this.closeReason);
+	};
+	pluginProto.exps = new Exps();
+}());
+;
+;
 cr.plugins_.Keyboard = function(runtime)
 {
 	this.runtime = runtime;
@@ -20442,14 +20594,15 @@ cr.behaviors.solid = function(runtime)
 }());
 cr.getObjectRefTable = function () { return [
 	cr.plugins_.Button,
+	cr.plugins_.Particles,
 	cr.plugins_.Keyboard,
 	cr.plugins_.Mouse,
-	cr.plugins_.Particles,
-	cr.plugins_.Photon,
 	cr.plugins_.Sprite,
+	cr.plugins_.TiledBg,
+	cr.plugins_.C2WebSocket,
+	cr.plugins_.Photon,
 	cr.plugins_.Text,
 	cr.plugins_.TextBox,
-	cr.plugins_.TiledBg,
 	cr.behaviors.Car,
 	cr.behaviors.solid,
 	cr.behaviors.Bullet,
