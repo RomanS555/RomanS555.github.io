@@ -15218,6 +15218,828 @@ cr.system_object.prototype.loadFromJSON = function (o)
 	};
 })();
 cr.shaders = {};
+cr.shaders["brightness"] = {src: ["varying mediump vec2 vTex;",
+"uniform lowp sampler2D samplerFront;",
+"uniform lowp float brightness;",
+"void main(void)",
+"{",
+"lowp vec4 front = texture2D(samplerFront, vTex);",
+"lowp float a = front.a;",
+"if (a != 0.0)",
+"front.rgb /= front.a;",
+"front.rgb += (brightness - 1.0);",
+"front.rgb *= a;",
+"gl_FragColor = front;",
+"}"
+].join("\n"),
+	extendBoxHorizontal: 0,
+	extendBoxVertical: 0,
+	crossSampling: false,
+	preservesOpaqueness: true,
+	animated: false,
+	parameters: [["brightness", 0, 1]] }
+;
+;
+cr.plugins_.Browser = function(runtime)
+{
+	this.runtime = runtime;
+};
+(function ()
+{
+	var pluginProto = cr.plugins_.Browser.prototype;
+	pluginProto.Type = function(plugin)
+	{
+		this.plugin = plugin;
+		this.runtime = plugin.runtime;
+	};
+	var typeProto = pluginProto.Type.prototype;
+	typeProto.onCreate = function()
+	{
+	};
+	var offlineScriptReady = false;
+	var browserPluginReady = false;
+	document.addEventListener("DOMContentLoaded", function ()
+	{
+		if (window["C2_RegisterSW"] && navigator["serviceWorker"])
+		{
+			var offlineClientScript = document.createElement("script");
+			offlineClientScript.onload = function ()
+			{
+				offlineScriptReady = true;
+				checkReady()
+			};
+			offlineClientScript.src = "offlineClient.js";
+			document.head.appendChild(offlineClientScript);
+		}
+	});
+	var browserInstance = null;
+	typeProto.onAppBegin = function ()
+	{
+		browserPluginReady = true;
+		checkReady();
+	};
+	function checkReady()
+	{
+		if (offlineScriptReady && browserPluginReady && window["OfflineClientInfo"])
+		{
+			window["OfflineClientInfo"]["SetMessageCallback"](function (e)
+			{
+				browserInstance.onSWMessage(e);
+			});
+		}
+	};
+	pluginProto.Instance = function(type)
+	{
+		this.type = type;
+		this.runtime = type.runtime;
+	};
+	var instanceProto = pluginProto.Instance.prototype;
+	instanceProto.onCreate = function()
+	{
+		var self = this;
+		window.addEventListener("resize", function () {
+			self.runtime.trigger(cr.plugins_.Browser.prototype.cnds.OnResize, self);
+		});
+		browserInstance = this;
+		if (typeof navigator.onLine !== "undefined")
+		{
+			window.addEventListener("online", function() {
+				self.runtime.trigger(cr.plugins_.Browser.prototype.cnds.OnOnline, self);
+			});
+			window.addEventListener("offline", function() {
+				self.runtime.trigger(cr.plugins_.Browser.prototype.cnds.OnOffline, self);
+			});
+		}
+		if (!this.runtime.isDirectCanvas)
+		{
+			document.addEventListener("appMobi.device.update.available", function() {
+				self.runtime.trigger(cr.plugins_.Browser.prototype.cnds.OnUpdateReady, self);
+			});
+			document.addEventListener("backbutton", function() {
+				self.runtime.trigger(cr.plugins_.Browser.prototype.cnds.OnBackButton, self);
+			});
+			document.addEventListener("menubutton", function() {
+				self.runtime.trigger(cr.plugins_.Browser.prototype.cnds.OnMenuButton, self);
+			});
+			document.addEventListener("searchbutton", function() {
+				self.runtime.trigger(cr.plugins_.Browser.prototype.cnds.OnSearchButton, self);
+			});
+			document.addEventListener("tizenhwkey", function (e) {
+				var ret;
+				switch (e["keyName"]) {
+				case "back":
+					ret = self.runtime.trigger(cr.plugins_.Browser.prototype.cnds.OnBackButton, self);
+					if (!ret)
+					{
+						if (window["tizen"])
+							window["tizen"]["application"]["getCurrentApplication"]()["exit"]();
+					}
+					break;
+				case "menu":
+					ret = self.runtime.trigger(cr.plugins_.Browser.prototype.cnds.OnMenuButton, self);
+					if (!ret)
+						e.preventDefault();
+					break;
+				}
+			});
+		}
+		if (this.runtime.isWindows10 && typeof Windows !== "undefined")
+		{
+			Windows["UI"]["Core"]["SystemNavigationManager"]["getForCurrentView"]().addEventListener("backrequested", function (e)
+			{
+				var ret = self.runtime.trigger(cr.plugins_.Browser.prototype.cnds.OnBackButton, self);
+				if (ret)
+					e["handled"] = true;
+		    });
+		}
+		else if (this.runtime.isWinJS && WinJS["Application"])
+		{
+			WinJS["Application"]["onbackclick"] = function (e)
+			{
+				return !!self.runtime.trigger(cr.plugins_.Browser.prototype.cnds.OnBackButton, self);
+			};
+		}
+		this.runtime.addSuspendCallback(function(s) {
+			if (s)
+			{
+				self.runtime.trigger(cr.plugins_.Browser.prototype.cnds.OnPageHidden, self);
+			}
+			else
+			{
+				self.runtime.trigger(cr.plugins_.Browser.prototype.cnds.OnPageVisible, self);
+			}
+		});
+		this.is_arcade = (typeof window["is_scirra_arcade"] !== "undefined");
+	};
+	instanceProto.onSWMessage = function (e)
+	{
+		var messageType = e["data"]["type"];
+		if (messageType === "downloading-update")
+			this.runtime.trigger(cr.plugins_.Browser.prototype.cnds.OnUpdateFound, this);
+		else if (messageType === "update-ready" || messageType === "update-pending")
+			this.runtime.trigger(cr.plugins_.Browser.prototype.cnds.OnUpdateReady, this);
+		else if (messageType === "offline-ready")
+			this.runtime.trigger(cr.plugins_.Browser.prototype.cnds.OnOfflineReady, this);
+	};
+	var batteryManager = null;
+	var loadedBatteryManager = false;
+	function maybeLoadBatteryManager()
+	{
+		if (loadedBatteryManager)
+			return;
+		if (!navigator["getBattery"])
+			return;
+		var promise = navigator["getBattery"]();
+		loadedBatteryManager = true;
+		if (promise)
+		{
+			promise.then(function (manager) {
+				batteryManager = manager;
+			});
+		}
+	};
+	function Cnds() {};
+	Cnds.prototype.CookiesEnabled = function()
+	{
+		return navigator ? navigator.cookieEnabled : false;
+	};
+	Cnds.prototype.IsOnline = function()
+	{
+		return navigator ? navigator.onLine : false;
+	};
+	Cnds.prototype.HasJava = function()
+	{
+		return navigator ? navigator.javaEnabled() : false;
+	};
+	Cnds.prototype.OnOnline = function()
+	{
+		return true;
+	};
+	Cnds.prototype.OnOffline = function()
+	{
+		return true;
+	};
+	Cnds.prototype.IsDownloadingUpdate = function ()
+	{
+		return false;		// deprecated
+	};
+	Cnds.prototype.OnUpdateReady = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.PageVisible = function ()
+	{
+		return !this.runtime.isSuspended;
+	};
+	Cnds.prototype.OnPageVisible = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnPageHidden = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnResize = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.IsFullscreen = function ()
+	{
+		return !!(document["mozFullScreen"] || document["webkitIsFullScreen"] || document["fullScreen"] || this.runtime.isNodeFullscreen);
+	};
+	Cnds.prototype.OnBackButton = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnMenuButton = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnSearchButton = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.IsMetered = function ()
+	{
+		var connection = navigator["connection"] || navigator["mozConnection"] || navigator["webkitConnection"];
+		if (!connection)
+			return false;
+		return !!connection["metered"];
+	};
+	Cnds.prototype.IsCharging = function ()
+	{
+		var battery = navigator["battery"] || navigator["mozBattery"] || navigator["webkitBattery"];
+		if (battery)
+		{
+			return !!battery["charging"]
+		}
+		else
+		{
+			maybeLoadBatteryManager();
+			if (batteryManager)
+			{
+				return !!batteryManager["charging"];
+			}
+			else
+			{
+				return true;		// if unknown, default to charging (powered)
+			}
+		}
+	};
+	Cnds.prototype.IsPortraitLandscape = function (p)
+	{
+		var current = (window.innerWidth <= window.innerHeight ? 0 : 1);
+		return current === p;
+	};
+	Cnds.prototype.SupportsFullscreen = function ()
+	{
+		if (this.runtime.isNodeWebkit)
+			return true;
+		var elem = this.runtime.canvasdiv || this.runtime.canvas;
+		return !!(elem["requestFullscreen"] || elem["mozRequestFullScreen"] || elem["msRequestFullscreen"] || elem["webkitRequestFullScreen"]);
+	};
+	Cnds.prototype.OnUpdateFound = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnUpdateReady = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnOfflineReady = function ()
+	{
+		return true;
+	};
+	pluginProto.cnds = new Cnds();
+	function Acts() {};
+	Acts.prototype.Alert = function (msg)
+	{
+		if (!this.runtime.isDomFree)
+			alert(msg.toString());
+	};
+	Acts.prototype.Close = function ()
+	{
+		if (this.runtime.isCocoonJs)
+			CocoonJS["App"]["forceToFinish"]();
+		else if (window["tizen"])
+			window["tizen"]["application"]["getCurrentApplication"]()["exit"]();
+		else if (navigator["app"] && navigator["app"]["exitApp"])
+			navigator["app"]["exitApp"]();
+		else if (navigator["device"] && navigator["device"]["exitApp"])
+			navigator["device"]["exitApp"]();
+		else if (!this.is_arcade && !this.runtime.isDomFree)
+			window.close();
+	};
+	Acts.prototype.Focus = function ()
+	{
+		if (this.runtime.isNodeWebkit)
+		{
+			var win = window["nwgui"]["Window"]["get"]();
+			win["focus"]();
+		}
+		else if (!this.is_arcade && !this.runtime.isDomFree)
+			window.focus();
+	};
+	Acts.prototype.Blur = function ()
+	{
+		if (this.runtime.isNodeWebkit)
+		{
+			var win = window["nwgui"]["Window"]["get"]();
+			win["blur"]();
+		}
+		else if (!this.is_arcade && !this.runtime.isDomFree)
+			window.blur();
+	};
+	Acts.prototype.GoBack = function ()
+	{
+		if (navigator["app"] && navigator["app"]["backHistory"])
+			navigator["app"]["backHistory"]();
+		else if (!this.is_arcade && !this.runtime.isDomFree && window.back)
+			window.back();
+	};
+	Acts.prototype.GoForward = function ()
+	{
+		if (!this.is_arcade && !this.runtime.isDomFree && window.forward)
+			window.forward();
+	};
+	Acts.prototype.GoHome = function ()
+	{
+		if (!this.is_arcade && !this.runtime.isDomFree && window.home)
+			window.home();
+	};
+	Acts.prototype.GoToURL = function (url, target)
+	{
+		if (this.runtime.isCocoonJs)
+			CocoonJS["App"]["openURL"](url);
+		else if (this.runtime.isEjecta)
+			ejecta["openURL"](url);
+		else if (this.runtime.isWinJS)
+			Windows["System"]["Launcher"]["launchUriAsync"](new Windows["Foundation"]["Uri"](url));
+		else if (navigator["app"] && navigator["app"]["loadUrl"])
+			navigator["app"]["loadUrl"](url, { "openExternal": true });
+		else if (self["cordova"] && self["cordova"]["InAppBrowser"])
+			self["cordova"]["InAppBrowser"]["open"](url, "_system");
+		else if (!this.is_arcade && !this.runtime.isDomFree)
+		{
+			if (target === 2 && !this.is_arcade)		// top
+				window.top.location = url;
+			else if (target === 1 && !this.is_arcade)	// parent
+				window.parent.location = url;
+			else					// self
+				window.location = url;
+		}
+	};
+	Acts.prototype.GoToURLWindow = function (url, tag)
+	{
+		if (this.runtime.isCocoonJs)
+			CocoonJS["App"]["openURL"](url);
+		else if (this.runtime.isEjecta)
+			ejecta["openURL"](url);
+		else if (this.runtime.isWinJS)
+			Windows["System"]["Launcher"]["launchUriAsync"](new Windows["Foundation"]["Uri"](url));
+		else if (navigator["app"] && navigator["app"]["loadUrl"])
+			navigator["app"]["loadUrl"](url, { "openExternal": true });
+		else if (self["cordova"] && self["cordova"]["InAppBrowser"])
+			self["cordova"]["InAppBrowser"]["open"](url, "_system");
+		else if (!this.is_arcade && !this.runtime.isDomFree)
+			window.open(url, tag);
+	};
+	Acts.prototype.Reload = function ()
+	{
+		if (!this.is_arcade && !this.runtime.isDomFree)
+			window.location.reload();
+	};
+	var firstRequestFullscreen = true;
+	var crruntime = null;
+	function onFullscreenError(e)
+	{
+		if (console && console.warn)
+			console.warn("Fullscreen request failed: ", e);
+		crruntime["setSize"](window.innerWidth, window.innerHeight);
+	};
+	Acts.prototype.RequestFullScreen = function (stretchmode)
+	{
+		if (this.runtime.isDomFree)
+		{
+			cr.logexport("[Construct 2] Requesting fullscreen is not supported on this platform - the request has been ignored");
+			return;
+		}
+		if (stretchmode >= 2)
+			stretchmode += 1;
+		if (stretchmode === 6)
+			stretchmode = 2;
+		if (this.runtime.isNodeWebkit)
+		{
+			if (this.runtime.isDebug)
+			{
+				debuggerFullscreen(true);
+			}
+			else if (!this.runtime.isNodeFullscreen && window["nwgui"])
+			{
+				window["nwgui"]["Window"]["get"]()["enterFullscreen"]();
+				this.runtime.isNodeFullscreen = true;
+				this.runtime.fullscreen_scaling = (stretchmode >= 2 ? stretchmode : 0);
+			}
+		}
+		else
+		{
+			if (document["mozFullScreen"] || document["webkitIsFullScreen"] || !!document["msFullscreenElement"] || document["fullScreen"] || document["fullScreenElement"])
+			{
+				return;
+			}
+			this.runtime.fullscreen_scaling = (stretchmode >= 2 ? stretchmode : 0);
+			var elem = document.documentElement;
+			if (firstRequestFullscreen)
+			{
+				firstRequestFullscreen = false;
+				crruntime = this.runtime;
+				elem.addEventListener("mozfullscreenerror", onFullscreenError);
+				elem.addEventListener("webkitfullscreenerror", onFullscreenError);
+				elem.addEventListener("MSFullscreenError", onFullscreenError);
+				elem.addEventListener("fullscreenerror", onFullscreenError);
+			}
+			if (elem["requestFullscreen"])
+				elem["requestFullscreen"]();
+			else if (elem["mozRequestFullScreen"])
+				elem["mozRequestFullScreen"]();
+			else if (elem["msRequestFullscreen"])
+				elem["msRequestFullscreen"]();
+			else if (elem["webkitRequestFullScreen"])
+			{
+				if (typeof Element !== "undefined" && typeof Element["ALLOW_KEYBOARD_INPUT"] !== "undefined")
+					elem["webkitRequestFullScreen"](Element["ALLOW_KEYBOARD_INPUT"]);
+				else
+					elem["webkitRequestFullScreen"]();
+			}
+		}
+	};
+	Acts.prototype.CancelFullScreen = function ()
+	{
+		if (this.runtime.isDomFree)
+		{
+			cr.logexport("[Construct 2] Exiting fullscreen is not supported on this platform - the request has been ignored");
+			return;
+		}
+		if (this.runtime.isNodeWebkit)
+		{
+			if (this.runtime.isDebug)
+			{
+				debuggerFullscreen(false);
+			}
+			else if (this.runtime.isNodeFullscreen && window["nwgui"])
+			{
+				window["nwgui"]["Window"]["get"]()["leaveFullscreen"]();
+				this.runtime.isNodeFullscreen = false;
+			}
+		}
+		else
+		{
+			if (document["exitFullscreen"])
+				document["exitFullscreen"]();
+			else if (document["mozCancelFullScreen"])
+				document["mozCancelFullScreen"]();
+			else if (document["msExitFullscreen"])
+				document["msExitFullscreen"]();
+			else if (document["webkitCancelFullScreen"])
+				document["webkitCancelFullScreen"]();
+		}
+	};
+	Acts.prototype.Vibrate = function (pattern_)
+	{
+		try {
+			var arr = pattern_.split(",");
+			var i, len;
+			for (i = 0, len = arr.length; i < len; i++)
+			{
+				arr[i] = parseInt(arr[i], 10);
+			}
+			if (navigator["vibrate"])
+				navigator["vibrate"](arr);
+			else if (navigator["mozVibrate"])
+				navigator["mozVibrate"](arr);
+			else if (navigator["webkitVibrate"])
+				navigator["webkitVibrate"](arr);
+			else if (navigator["msVibrate"])
+				navigator["msVibrate"](arr);
+		}
+		catch (e) {}
+	};
+	Acts.prototype.InvokeDownload = function (url_, filename_)
+	{
+		var a = document.createElement("a");
+		if (typeof a["download"] === "undefined")
+		{
+			window.open(url_);
+		}
+		else
+		{
+			var body = document.getElementsByTagName("body")[0];
+			a.textContent = filename_;
+			a.href = url_;
+			a["download"] = filename_;
+			body.appendChild(a);
+			var clickEvent = new MouseEvent("click");
+			a.dispatchEvent(clickEvent);
+			body.removeChild(a);
+		}
+	};
+	Acts.prototype.InvokeDownloadString = function (str_, mimetype_, filename_)
+	{
+		var datauri = "data:" + mimetype_ + "," + encodeURIComponent(str_);
+		var a = document.createElement("a");
+		if (typeof a["download"] === "undefined")
+		{
+			window.open(datauri);
+		}
+		else
+		{
+			var body = document.getElementsByTagName("body")[0];
+			a.textContent = filename_;
+			a.href = datauri;
+			a["download"] = filename_;
+			body.appendChild(a);
+			var clickEvent = new MouseEvent("click");
+			a.dispatchEvent(clickEvent);
+			body.removeChild(a);
+		}
+	};
+	Acts.prototype.ConsoleLog = function (type_, msg_)
+	{
+		if (typeof console === "undefined")
+			return;
+		if (type_ === 0 && console.log)
+			console.log(msg_.toString());
+		if (type_ === 1 && console.warn)
+			console.warn(msg_.toString());
+		if (type_ === 2 && console.error)
+			console.error(msg_.toString());
+	};
+	Acts.prototype.ConsoleGroup = function (name_)
+	{
+		if (console && console.group)
+			console.group(name_);
+	};
+	Acts.prototype.ConsoleGroupEnd = function ()
+	{
+		if (console && console.groupEnd)
+			console.groupEnd();
+	};
+	Acts.prototype.ExecJs = function (js_)
+	{
+		try {
+			if (eval)
+				eval(js_);
+		}
+		catch (e)
+		{
+			if (console && console.error)
+				console.error("Error executing Javascript: ", e);
+		}
+	};
+	var orientations = [
+		"portrait",
+		"landscape",
+		"portrait-primary",
+		"portrait-secondary",
+		"landscape-primary",
+		"landscape-secondary"
+	];
+	Acts.prototype.LockOrientation = function (o)
+	{
+		o = Math.floor(o);
+		if (o < 0 || o >= orientations.length)
+			return;
+		this.runtime.autoLockOrientation = false;
+		var orientation = orientations[o];
+		if (screen["orientation"] && screen["orientation"]["lock"])
+			screen["orientation"]["lock"](orientation);
+		else if (screen["lockOrientation"])
+			screen["lockOrientation"](orientation);
+		else if (screen["webkitLockOrientation"])
+			screen["webkitLockOrientation"](orientation);
+		else if (screen["mozLockOrientation"])
+			screen["mozLockOrientation"](orientation);
+		else if (screen["msLockOrientation"])
+			screen["msLockOrientation"](orientation);
+	};
+	Acts.prototype.UnlockOrientation = function ()
+	{
+		this.runtime.autoLockOrientation = false;
+		if (screen["orientation"] && screen["orientation"]["unlock"])
+			screen["orientation"]["unlock"]();
+		else if (screen["unlockOrientation"])
+			screen["unlockOrientation"]();
+		else if (screen["webkitUnlockOrientation"])
+			screen["webkitUnlockOrientation"]();
+		else if (screen["mozUnlockOrientation"])
+			screen["mozUnlockOrientation"]();
+		else if (screen["msUnlockOrientation"])
+			screen["msUnlockOrientation"]();
+	};
+	pluginProto.acts = new Acts();
+	function Exps() {};
+	Exps.prototype.URL = function (ret)
+	{
+		ret.set_string(this.runtime.isDomFree ? "" : window.location.toString());
+	};
+	Exps.prototype.Protocol = function (ret)
+	{
+		ret.set_string(this.runtime.isDomFree ? "" : window.location.protocol);
+	};
+	Exps.prototype.Domain = function (ret)
+	{
+		ret.set_string(this.runtime.isDomFree ? "" : window.location.hostname);
+	};
+	Exps.prototype.PathName = function (ret)
+	{
+		ret.set_string(this.runtime.isDomFree ? "" : window.location.pathname);
+	};
+	Exps.prototype.Hash = function (ret)
+	{
+		ret.set_string(this.runtime.isDomFree ? "" : window.location.hash);
+	};
+	Exps.prototype.Referrer = function (ret)
+	{
+		ret.set_string(this.runtime.isDomFree ? "" : document.referrer);
+	};
+	Exps.prototype.Title = function (ret)
+	{
+		ret.set_string(this.runtime.isDomFree ? "" : document.title);
+	};
+	Exps.prototype.Name = function (ret)
+	{
+		ret.set_string(this.runtime.isDomFree ? "" : navigator.appName);
+	};
+	Exps.prototype.Version = function (ret)
+	{
+		ret.set_string(this.runtime.isDomFree ? "" : navigator.appVersion);
+	};
+	Exps.prototype.Language = function (ret)
+	{
+		if (navigator && navigator.language)
+			ret.set_string(navigator.language);
+		else
+			ret.set_string("");
+	};
+	Exps.prototype.Platform = function (ret)
+	{
+		ret.set_string(this.runtime.isDomFree ? "" : navigator.platform);
+	};
+	Exps.prototype.Product = function (ret)
+	{
+		if (navigator && navigator.product)
+			ret.set_string(navigator.product);
+		else
+			ret.set_string("");
+	};
+	Exps.prototype.Vendor = function (ret)
+	{
+		if (navigator && navigator.vendor)
+			ret.set_string(navigator.vendor);
+		else
+			ret.set_string("");
+	};
+	Exps.prototype.UserAgent = function (ret)
+	{
+		ret.set_string(this.runtime.isDomFree ? "" : navigator.userAgent);
+	};
+	Exps.prototype.QueryString = function (ret)
+	{
+		ret.set_string(this.runtime.isDomFree ? "" : window.location.search);
+	};
+	Exps.prototype.QueryParam = function (ret, paramname)
+	{
+		if (this.runtime.isDomFree)
+		{
+			ret.set_string("");
+			return;
+		}
+		var match = RegExp('[?&]' + paramname + '=([^&]*)').exec(window.location.search);
+		if (match)
+			ret.set_string(decodeURIComponent(match[1].replace(/\+/g, ' ')));
+		else
+			ret.set_string("");
+	};
+	Exps.prototype.Bandwidth = function (ret)
+	{
+		var connection = navigator["connection"] || navigator["mozConnection"] || navigator["webkitConnection"];
+		if (!connection)
+			ret.set_float(Number.POSITIVE_INFINITY);
+		else
+		{
+			if (typeof connection["bandwidth"] !== "undefined")
+				ret.set_float(connection["bandwidth"]);
+			else if (typeof connection["downlinkMax"] !== "undefined")
+				ret.set_float(connection["downlinkMax"]);
+			else
+				ret.set_float(Number.POSITIVE_INFINITY);
+		}
+	};
+	Exps.prototype.ConnectionType = function (ret)
+	{
+		var connection = navigator["connection"] || navigator["mozConnection"] || navigator["webkitConnection"];
+		if (!connection)
+			ret.set_string("unknown");
+		else
+		{
+			ret.set_string(connection["type"] || "unknown");
+		}
+	};
+	Exps.prototype.BatteryLevel = function (ret)
+	{
+		var battery = navigator["battery"] || navigator["mozBattery"] || navigator["webkitBattery"];
+		if (battery)
+		{
+			ret.set_float(battery["level"]);
+		}
+		else
+		{
+			maybeLoadBatteryManager();
+			if (batteryManager)
+			{
+				ret.set_float(batteryManager["level"]);
+			}
+			else
+			{
+				ret.set_float(1);		// not supported/unknown: assume charged
+			}
+		}
+	};
+	Exps.prototype.BatteryTimeLeft = function (ret)
+	{
+		var battery = navigator["battery"] || navigator["mozBattery"] || navigator["webkitBattery"];
+		if (battery)
+		{
+			ret.set_float(battery["dischargingTime"]);
+		}
+		else
+		{
+			maybeLoadBatteryManager();
+			if (batteryManager)
+			{
+				ret.set_float(batteryManager["dischargingTime"]);
+			}
+			else
+			{
+				ret.set_float(Number.POSITIVE_INFINITY);		// not supported/unknown: assume infinite time left
+			}
+		}
+	};
+	Exps.prototype.ExecJS = function (ret, js_)
+	{
+		if (!eval)
+		{
+			ret.set_any(0);
+			return;
+		}
+		var result = 0;
+		try {
+			result = eval(js_);
+		}
+		catch (e)
+		{
+			if (console && console.error)
+				console.error("Error executing Javascript: ", e);
+		}
+		if (typeof result === "number")
+			ret.set_any(result);
+		else if (typeof result === "string")
+			ret.set_any(result);
+		else if (typeof result === "boolean")
+			ret.set_any(result ? 1 : 0);
+		else
+			ret.set_any(0);
+	};
+	Exps.prototype.ScreenWidth = function (ret)
+	{
+		ret.set_int(screen.width);
+	};
+	Exps.prototype.ScreenHeight = function (ret)
+	{
+		ret.set_int(screen.height);
+	};
+	Exps.prototype.DevicePixelRatio = function (ret)
+	{
+		ret.set_float(this.runtime.devicePixelRatio);
+	};
+	Exps.prototype.WindowInnerWidth = function (ret)
+	{
+		ret.set_int(window.innerWidth);
+	};
+	Exps.prototype.WindowInnerHeight = function (ret)
+	{
+		ret.set_int(window.innerHeight);
+	};
+	Exps.prototype.WindowOuterWidth = function (ret)
+	{
+		ret.set_int(window.outerWidth);
+	};
+	Exps.prototype.WindowOuterHeight = function (ret)
+	{
+		ret.set_int(window.outerHeight);
+	};
+	pluginProto.exps = new Exps();
+}());
 ;
 ;
 cr.plugins_.Button = function(runtime)
@@ -19786,13 +20608,1507 @@ cr.plugins_.TiledBg = function(runtime)
 }());
 ;
 ;
-cr.behaviors.Bullet = function(runtime)
+cr.plugins_.Touch = function(runtime)
 {
 	this.runtime = runtime;
 };
 (function ()
 {
-	var behaviorProto = cr.behaviors.Bullet.prototype;
+	var pluginProto = cr.plugins_.Touch.prototype;
+	pluginProto.Type = function(plugin)
+	{
+		this.plugin = plugin;
+		this.runtime = plugin.runtime;
+	};
+	var typeProto = pluginProto.Type.prototype;
+	typeProto.onCreate = function()
+	{
+	};
+	pluginProto.Instance = function(type)
+	{
+		this.type = type;
+		this.runtime = type.runtime;
+		this.touches = [];
+		this.mouseDown = false;
+	};
+	var instanceProto = pluginProto.Instance.prototype;
+	var dummyoffset = {left: 0, top: 0};
+	instanceProto.findTouch = function (id)
+	{
+		var i, len;
+		for (i = 0, len = this.touches.length; i < len; i++)
+		{
+			if (this.touches[i]["id"] === id)
+				return i;
+		}
+		return -1;
+	};
+	var appmobi_accx = 0;
+	var appmobi_accy = 0;
+	var appmobi_accz = 0;
+	function AppMobiGetAcceleration(evt)
+	{
+		appmobi_accx = evt.x;
+		appmobi_accy = evt.y;
+		appmobi_accz = evt.z;
+	};
+	var pg_accx = 0;
+	var pg_accy = 0;
+	var pg_accz = 0;
+	function PhoneGapGetAcceleration(evt)
+	{
+		pg_accx = evt.x;
+		pg_accy = evt.y;
+		pg_accz = evt.z;
+	};
+	var theInstance = null;
+	var touchinfo_cache = [];
+	function AllocTouchInfo(x, y, id, index)
+	{
+		var ret;
+		if (touchinfo_cache.length)
+			ret = touchinfo_cache.pop();
+		else
+			ret = new TouchInfo();
+		ret.init(x, y, id, index);
+		return ret;
+	};
+	function ReleaseTouchInfo(ti)
+	{
+		if (touchinfo_cache.length < 100)
+			touchinfo_cache.push(ti);
+	};
+	var GESTURE_HOLD_THRESHOLD = 15;		// max px motion for hold gesture to register
+	var GESTURE_HOLD_TIMEOUT = 500;			// time for hold gesture to register
+	var GESTURE_TAP_TIMEOUT = 333;			// time for tap gesture to register
+	var GESTURE_DOUBLETAP_THRESHOLD = 25;	// max distance apart for taps to be
+	function TouchInfo()
+	{
+		this.starttime = 0;
+		this.time = 0;
+		this.lasttime = 0;
+		this.startx = 0;
+		this.starty = 0;
+		this.x = 0;
+		this.y = 0;
+		this.lastx = 0;
+		this.lasty = 0;
+		this["id"] = 0;
+		this.startindex = 0;
+		this.triggeredHold = false;
+		this.tooFarForHold = false;
+	};
+	TouchInfo.prototype.init = function (x, y, id, index)
+	{
+		var nowtime = cr.performance_now();
+		this.time = nowtime;
+		this.lasttime = nowtime;
+		this.starttime = nowtime;
+		this.startx = x;
+		this.starty = y;
+		this.x = x;
+		this.y = y;
+		this.lastx = x;
+		this.lasty = y;
+		this.width = 0;
+		this.height = 0;
+		this.pressure = 0;
+		this["id"] = id;
+		this.startindex = index;
+		this.triggeredHold = false;
+		this.tooFarForHold = false;
+	};
+	TouchInfo.prototype.update = function (nowtime, x, y, width, height, pressure)
+	{
+		this.lasttime = this.time;
+		this.time = nowtime;
+		this.lastx = this.x;
+		this.lasty = this.y;
+		this.x = x;
+		this.y = y;
+		this.width = width;
+		this.height = height;
+		this.pressure = pressure;
+		if (!this.tooFarForHold && cr.distanceTo(this.startx, this.starty, this.x, this.y) >= GESTURE_HOLD_THRESHOLD)
+		{
+			this.tooFarForHold = true;
+		}
+	};
+	TouchInfo.prototype.maybeTriggerHold = function (inst, index)
+	{
+		if (this.triggeredHold)
+			return;		// already triggered this gesture
+		var nowtime = cr.performance_now();
+		if (nowtime - this.starttime >= GESTURE_HOLD_TIMEOUT && !this.tooFarForHold && cr.distanceTo(this.startx, this.starty, this.x, this.y) < GESTURE_HOLD_THRESHOLD)
+		{
+			this.triggeredHold = true;
+			inst.trigger_index = this.startindex;
+			inst.trigger_id = this["id"];
+			inst.getTouchIndex = index;
+			inst.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnHoldGesture, inst);
+			inst.curTouchX = this.x;
+			inst.curTouchY = this.y;
+			inst.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnHoldGestureObject, inst);
+			inst.getTouchIndex = 0;
+		}
+	};
+	var lastTapX = -1000;
+	var lastTapY = -1000;
+	var lastTapTime = -10000;
+	TouchInfo.prototype.maybeTriggerTap = function (inst, index)
+	{
+		if (this.triggeredHold)
+			return;
+		var nowtime = cr.performance_now();
+		if (nowtime - this.starttime <= GESTURE_TAP_TIMEOUT && !this.tooFarForHold && cr.distanceTo(this.startx, this.starty, this.x, this.y) < GESTURE_HOLD_THRESHOLD)
+		{
+			inst.trigger_index = this.startindex;
+			inst.trigger_id = this["id"];
+			inst.getTouchIndex = index;
+			if ((nowtime - lastTapTime <= GESTURE_TAP_TIMEOUT * 2) && cr.distanceTo(lastTapX, lastTapY, this.x, this.y) < GESTURE_DOUBLETAP_THRESHOLD)
+			{
+				inst.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnDoubleTapGesture, inst);
+				inst.curTouchX = this.x;
+				inst.curTouchY = this.y;
+				inst.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnDoubleTapGestureObject, inst);
+				lastTapX = -1000;
+				lastTapY = -1000;
+				lastTapTime = -10000;
+			}
+			else
+			{
+				inst.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnTapGesture, inst);
+				inst.curTouchX = this.x;
+				inst.curTouchY = this.y;
+				inst.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnTapGestureObject, inst);
+				lastTapX = this.x;
+				lastTapY = this.y;
+				lastTapTime = nowtime;
+			}
+			inst.getTouchIndex = 0;
+		}
+	};
+	instanceProto.onCreate = function()
+	{
+		theInstance = this;
+		this.isWindows8 = !!(typeof window["c2isWindows8"] !== "undefined" && window["c2isWindows8"]);
+		this.orient_alpha = 0;
+		this.orient_beta = 0;
+		this.orient_gamma = 0;
+		this.acc_g_x = 0;
+		this.acc_g_y = 0;
+		this.acc_g_z = 0;
+		this.acc_x = 0;
+		this.acc_y = 0;
+		this.acc_z = 0;
+		this.curTouchX = 0;
+		this.curTouchY = 0;
+		this.trigger_index = 0;
+		this.trigger_id = 0;
+		this.trigger_permission = 0;
+		this.getTouchIndex = 0;
+		this.useMouseInput = (this.properties[0] !== 0);
+		var elem = (this.runtime.fullscreen_mode > 0) ? document : this.runtime.canvas;
+		var elem2 = document;
+		if (this.runtime.isDirectCanvas)
+			elem2 = elem = window["Canvas"];
+		else if (this.runtime.isCocoonJs)
+			elem2 = elem = window;
+		var self = this;
+		if (typeof PointerEvent !== "undefined")
+		{
+			elem.addEventListener("pointerdown",
+				function(info) {
+					self.onPointerStart(info);
+				},
+				false
+			);
+			elem.addEventListener("pointermove",
+				function(info) {
+					self.onPointerMove(info);
+				},
+				false
+			);
+			elem2.addEventListener("pointerup",
+				function(info) {
+					self.onPointerEnd(info, false);
+				},
+				false
+			);
+			elem2.addEventListener("pointercancel",
+				function(info) {
+					self.onPointerEnd(info, true);
+				},
+				false
+			);
+			if (this.runtime.canvas)
+			{
+				this.runtime.canvas.addEventListener("MSGestureHold", function(e) {
+					e.preventDefault();
+				}, false);
+				document.addEventListener("MSGestureHold", function(e) {
+					e.preventDefault();
+				}, false);
+				this.runtime.canvas.addEventListener("gesturehold", function(e) {
+					e.preventDefault();
+				}, false);
+				document.addEventListener("gesturehold", function(e) {
+					e.preventDefault();
+				}, false);
+			}
+		}
+		else if (window.navigator["msPointerEnabled"])
+		{
+			elem.addEventListener("MSPointerDown",
+				function(info) {
+					self.onPointerStart(info);
+				},
+				false
+			);
+			elem.addEventListener("MSPointerMove",
+				function(info) {
+					self.onPointerMove(info);
+				},
+				false
+			);
+			elem2.addEventListener("MSPointerUp",
+				function(info) {
+					self.onPointerEnd(info, false);
+				},
+				false
+			);
+			elem2.addEventListener("MSPointerCancel",
+				function(info) {
+					self.onPointerEnd(info, true);
+				},
+				false
+			);
+			if (this.runtime.canvas)
+			{
+				this.runtime.canvas.addEventListener("MSGestureHold", function(e) {
+					e.preventDefault();
+				}, false);
+				document.addEventListener("MSGestureHold", function(e) {
+					e.preventDefault();
+				}, false);
+			}
+		}
+		else
+		{
+			elem.addEventListener("touchstart",
+				function(info) {
+					self.onTouchStart(info);
+				},
+				false
+			);
+			elem.addEventListener("touchmove",
+				function(info) {
+					self.onTouchMove(info);
+				},
+				false
+			);
+			elem2.addEventListener("touchend",
+				function(info) {
+					self.onTouchEnd(info, false);
+				},
+				false
+			);
+			elem2.addEventListener("touchcancel",
+				function(info) {
+					self.onTouchEnd(info, true);
+				},
+				false
+			);
+		}
+		if (this.isWindows8)
+		{
+			var win8accelerometerFn = function(e) {
+					var reading = e["reading"];
+					self.acc_x = reading["accelerationX"];
+					self.acc_y = reading["accelerationY"];
+					self.acc_z = reading["accelerationZ"];
+				};
+			var win8inclinometerFn = function(e) {
+					var reading = e["reading"];
+					self.orient_alpha = reading["yawDegrees"];
+					self.orient_beta = reading["pitchDegrees"];
+					self.orient_gamma = reading["rollDegrees"];
+				};
+			var accelerometer = Windows["Devices"]["Sensors"]["Accelerometer"]["getDefault"]();
+            if (accelerometer)
+			{
+                accelerometer["reportInterval"] = Math.max(accelerometer["minimumReportInterval"], 16);
+				accelerometer.addEventListener("readingchanged", win8accelerometerFn);
+            }
+			var inclinometer = Windows["Devices"]["Sensors"]["Inclinometer"]["getDefault"]();
+			if (inclinometer)
+			{
+				inclinometer["reportInterval"] = Math.max(inclinometer["minimumReportInterval"], 16);
+				inclinometer.addEventListener("readingchanged", win8inclinometerFn);
+			}
+			document.addEventListener("visibilitychange", function(e) {
+				if (document["hidden"] || document["msHidden"])
+				{
+					if (accelerometer)
+						accelerometer.removeEventListener("readingchanged", win8accelerometerFn);
+					if (inclinometer)
+						inclinometer.removeEventListener("readingchanged", win8inclinometerFn);
+				}
+				else
+				{
+					if (accelerometer)
+						accelerometer.addEventListener("readingchanged", win8accelerometerFn);
+					if (inclinometer)
+						inclinometer.addEventListener("readingchanged", win8inclinometerFn);
+				}
+			}, false);
+		}
+		else
+		{
+			window.addEventListener("deviceorientation", function (eventData) {
+				self.orient_alpha = eventData["alpha"] || 0;
+				self.orient_beta = eventData["beta"] || 0;
+				self.orient_gamma = eventData["gamma"] || 0;
+			}, false);
+			window.addEventListener("devicemotion", function (eventData) {
+				if (eventData["accelerationIncludingGravity"])
+				{
+					self.acc_g_x = eventData["accelerationIncludingGravity"]["x"] || 0;
+					self.acc_g_y = eventData["accelerationIncludingGravity"]["y"] || 0;
+					self.acc_g_z = eventData["accelerationIncludingGravity"]["z"] || 0;
+				}
+				if (eventData["acceleration"])
+				{
+					self.acc_x = eventData["acceleration"]["x"] || 0;
+					self.acc_y = eventData["acceleration"]["y"] || 0;
+					self.acc_z = eventData["acceleration"]["z"] || 0;
+				}
+			}, false);
+		}
+		if (this.useMouseInput && !this.runtime.isDomFree)
+		{
+			jQuery(document).mousemove(
+				function(info) {
+					self.onMouseMove(info);
+				}
+			);
+			jQuery(document).mousedown(
+				function(info) {
+					self.onMouseDown(info);
+				}
+			);
+			jQuery(document).mouseup(
+				function(info) {
+					self.onMouseUp(info);
+				}
+			);
+		}
+		if (!this.runtime.isiOS && this.runtime.isCordova && navigator["accelerometer"] && navigator["accelerometer"]["watchAcceleration"])
+		{
+			navigator["accelerometer"]["watchAcceleration"](PhoneGapGetAcceleration, null, { "frequency": 40 });
+		}
+		this.runtime.tick2Me(this);
+	};
+	instanceProto.onPointerMove = function (info)
+	{
+		if (info["pointerType"] === info["MSPOINTER_TYPE_MOUSE"] || info["pointerType"] === "mouse")
+			return;
+		if (info.preventDefault)
+			info.preventDefault();
+		var i = this.findTouch(info["pointerId"]);
+		var nowtime = cr.performance_now();
+		if (i >= 0)
+		{
+			var offset = this.runtime.isDomFree ? dummyoffset : jQuery(this.runtime.canvas).offset();
+			var t = this.touches[i];
+			if (nowtime - t.time < 2)
+				return;
+			t.update(nowtime, info.pageX - offset.left, info.pageY - offset.top, info.width || 0, info.height || 0, info.pressure || 0);
+		}
+	};
+	instanceProto.onPointerStart = function (info)
+	{
+		if (info["pointerType"] === info["MSPOINTER_TYPE_MOUSE"] || info["pointerType"] === "mouse")
+			return;
+		if (info.preventDefault && cr.isCanvasInputEvent(info))
+			info.preventDefault();
+		var offset = this.runtime.isDomFree ? dummyoffset : jQuery(this.runtime.canvas).offset();
+		var touchx = info.pageX - offset.left;
+		var touchy = info.pageY - offset.top;
+		var nowtime = cr.performance_now();
+		this.trigger_index = this.touches.length;
+		this.trigger_id = info["pointerId"];
+		this.touches.push(AllocTouchInfo(touchx, touchy, info["pointerId"], this.trigger_index));
+		this.runtime.isInUserInputEvent = true;
+		this.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnNthTouchStart, this);
+		this.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnTouchStart, this);
+		this.curTouchX = touchx;
+		this.curTouchY = touchy;
+		this.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnTouchObject, this);
+		this.runtime.isInUserInputEvent = false;
+	};
+	instanceProto.onPointerEnd = function (info, isCancel)
+	{
+		if (info["pointerType"] === info["MSPOINTER_TYPE_MOUSE"] || info["pointerType"] === "mouse")
+			return;
+		if (info.preventDefault && cr.isCanvasInputEvent(info))
+			info.preventDefault();
+		var i = this.findTouch(info["pointerId"]);
+		this.trigger_index = (i >= 0 ? this.touches[i].startindex : -1);
+		this.trigger_id = (i >= 0 ? this.touches[i]["id"] : -1);
+		this.runtime.isInUserInputEvent = true;
+		this.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnNthTouchEnd, this);
+		this.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnTouchEnd, this);
+		if (i >= 0)
+		{
+			if (!isCancel)
+				this.touches[i].maybeTriggerTap(this, i);
+			ReleaseTouchInfo(this.touches[i]);
+			this.touches.splice(i, 1);
+		}
+		this.runtime.isInUserInputEvent = false;
+	};
+	instanceProto.onTouchMove = function (info)
+	{
+		if (info.preventDefault)
+			info.preventDefault();
+		var nowtime = cr.performance_now();
+		var i, len, t, u;
+		for (i = 0, len = info.changedTouches.length; i < len; i++)
+		{
+			t = info.changedTouches[i];
+			var j = this.findTouch(t["identifier"]);
+			if (j >= 0)
+			{
+				var offset = this.runtime.isDomFree ? dummyoffset : jQuery(this.runtime.canvas).offset();
+				u = this.touches[j];
+				if (nowtime - u.time < 2)
+					continue;
+				var touchWidth = (t.radiusX || t.webkitRadiusX || t.mozRadiusX || t.msRadiusX || 0) * 2;
+				var touchHeight = (t.radiusY || t.webkitRadiusY || t.mozRadiusY || t.msRadiusY || 0) * 2;
+				var touchForce = t.force || t.webkitForce || t.mozForce || t.msForce || 0;
+				u.update(nowtime, t.pageX - offset.left, t.pageY - offset.top, touchWidth, touchHeight, touchForce);
+			}
+		}
+	};
+	instanceProto.onTouchStart = function (info)
+	{
+		if (info.preventDefault && cr.isCanvasInputEvent(info))
+			info.preventDefault();
+		var offset = this.runtime.isDomFree ? dummyoffset : jQuery(this.runtime.canvas).offset();
+		var nowtime = cr.performance_now();
+		this.runtime.isInUserInputEvent = true;
+		var i, len, t, j;
+		for (i = 0, len = info.changedTouches.length; i < len; i++)
+		{
+			t = info.changedTouches[i];
+			j = this.findTouch(t["identifier"]);
+			if (j !== -1)
+				continue;
+			var touchx = t.pageX - offset.left;
+			var touchy = t.pageY - offset.top;
+			this.trigger_index = this.touches.length;
+			this.trigger_id = t["identifier"];
+			this.touches.push(AllocTouchInfo(touchx, touchy, t["identifier"], this.trigger_index));
+			this.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnNthTouchStart, this);
+			this.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnTouchStart, this);
+			this.curTouchX = touchx;
+			this.curTouchY = touchy;
+			this.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnTouchObject, this);
+		}
+		this.runtime.isInUserInputEvent = false;
+	};
+	instanceProto.onTouchEnd = function (info, isCancel)
+	{
+		if (info.preventDefault && cr.isCanvasInputEvent(info))
+			info.preventDefault();
+		this.runtime.isInUserInputEvent = true;
+		var i, len, t, j;
+		for (i = 0, len = info.changedTouches.length; i < len; i++)
+		{
+			t = info.changedTouches[i];
+			j = this.findTouch(t["identifier"]);
+			if (j >= 0)
+			{
+				this.trigger_index = this.touches[j].startindex;
+				this.trigger_id = this.touches[j]["id"];
+				this.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnNthTouchEnd, this);
+				this.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnTouchEnd, this);
+				if (!isCancel)
+					this.touches[j].maybeTriggerTap(this, j);
+				ReleaseTouchInfo(this.touches[j]);
+				this.touches.splice(j, 1);
+			}
+		}
+		this.runtime.isInUserInputEvent = false;
+	};
+	instanceProto.getAlpha = function ()
+	{
+		if (this.runtime.isCordova && this.orient_alpha === 0 && pg_accz !== 0)
+			return pg_accz * 90;
+		else
+			return this.orient_alpha;
+	};
+	instanceProto.getBeta = function ()
+	{
+		if (this.runtime.isCordova && this.orient_beta === 0 && pg_accy !== 0)
+			return pg_accy * 90;
+		else
+			return this.orient_beta;
+	};
+	instanceProto.getGamma = function ()
+	{
+		if (this.runtime.isCordova && this.orient_gamma === 0 && pg_accx !== 0)
+			return pg_accx * 90;
+		else
+			return this.orient_gamma;
+	};
+	var noop_func = function(){};
+	function isCompatibilityMouseEvent(e)
+	{
+		return (e["sourceCapabilities"] && e["sourceCapabilities"]["firesTouchEvents"]) ||
+				(e.originalEvent && e.originalEvent["sourceCapabilities"] && e.originalEvent["sourceCapabilities"]["firesTouchEvents"]);
+	};
+	instanceProto.onMouseDown = function(info)
+	{
+		if (isCompatibilityMouseEvent(info))
+			return;
+		var t = { pageX: info.pageX, pageY: info.pageY, "identifier": 0 };
+		var fakeinfo = { changedTouches: [t] };
+		this.onTouchStart(fakeinfo);
+		this.mouseDown = true;
+	};
+	instanceProto.onMouseMove = function(info)
+	{
+		if (!this.mouseDown)
+			return;
+		if (isCompatibilityMouseEvent(info))
+			return;
+		var t = { pageX: info.pageX, pageY: info.pageY, "identifier": 0 };
+		var fakeinfo = { changedTouches: [t] };
+		this.onTouchMove(fakeinfo);
+	};
+	instanceProto.onMouseUp = function(info)
+	{
+		if (info.preventDefault && this.runtime.had_a_click && !this.runtime.isMobile)
+			info.preventDefault();
+		this.runtime.had_a_click = true;
+		if (isCompatibilityMouseEvent(info))
+			return;
+		var t = { pageX: info.pageX, pageY: info.pageY, "identifier": 0 };
+		var fakeinfo = { changedTouches: [t] };
+		this.onTouchEnd(fakeinfo);
+		this.mouseDown = false;
+	};
+	instanceProto.tick2 = function()
+	{
+		var i, len, t;
+		var nowtime = cr.performance_now();
+		for (i = 0, len = this.touches.length; i < len; ++i)
+		{
+			t = this.touches[i];
+			if (t.time <= nowtime - 50)
+				t.lasttime = nowtime;
+			t.maybeTriggerHold(this, i);
+		}
+	};
+	function Cnds() {};
+	Cnds.prototype.OnTouchStart = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnTouchEnd = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.IsInTouch = function ()
+	{
+		return this.touches.length;
+	};
+	Cnds.prototype.OnTouchObject = function (type)
+	{
+		if (!type)
+			return false;
+		return this.runtime.testAndSelectCanvasPointOverlap(type, this.curTouchX, this.curTouchY, false);
+	};
+	var touching = [];
+	Cnds.prototype.IsTouchingObject = function (type)
+	{
+		if (!type)
+			return false;
+		var sol = type.getCurrentSol();
+		var instances = sol.getObjects();
+		var px, py;
+		var i, leni, j, lenj;
+		for (i = 0, leni = instances.length; i < leni; i++)
+		{
+			var inst = instances[i];
+			inst.update_bbox();
+			for (j = 0, lenj = this.touches.length; j < lenj; j++)
+			{
+				var touch = this.touches[j];
+				px = inst.layer.canvasToLayer(touch.x, touch.y, true);
+				py = inst.layer.canvasToLayer(touch.x, touch.y, false);
+				if (inst.contains_pt(px, py))
+				{
+					touching.push(inst);
+					break;
+				}
+			}
+		}
+		if (touching.length)
+		{
+			sol.select_all = false;
+			cr.shallowAssignArray(sol.instances, touching);
+			type.applySolToContainer();
+			cr.clearArray(touching);
+			return true;
+		}
+		else
+			return false;
+	};
+	Cnds.prototype.CompareTouchSpeed = function (index, cmp, s)
+	{
+		index = Math.floor(index);
+		if (index < 0 || index >= this.touches.length)
+			return false;
+		var t = this.touches[index];
+		var dist = cr.distanceTo(t.x, t.y, t.lastx, t.lasty);
+		var timediff = (t.time - t.lasttime) / 1000;
+		var speed = 0;
+		if (timediff > 0)
+			speed = dist / timediff;
+		return cr.do_cmp(speed, cmp, s);
+	};
+	Cnds.prototype.OrientationSupported = function ()
+	{
+		return typeof window["DeviceOrientationEvent"] !== "undefined";
+	};
+	Cnds.prototype.MotionSupported = function ()
+	{
+		return typeof window["DeviceMotionEvent"] !== "undefined";
+	};
+	Cnds.prototype.CompareOrientation = function (orientation_, cmp_, angle_)
+	{
+		var v = 0;
+		if (orientation_ === 0)
+			v = this.getAlpha();
+		else if (orientation_ === 1)
+			v = this.getBeta();
+		else
+			v = this.getGamma();
+		return cr.do_cmp(v, cmp_, angle_);
+	};
+	Cnds.prototype.CompareAcceleration = function (acceleration_, cmp_, angle_)
+	{
+		var v = 0;
+		if (acceleration_ === 0)
+			v = this.acc_g_x;
+		else if (acceleration_ === 1)
+			v = this.acc_g_y;
+		else if (acceleration_ === 2)
+			v = this.acc_g_z;
+		else if (acceleration_ === 3)
+			v = this.acc_x;
+		else if (acceleration_ === 4)
+			v = this.acc_y;
+		else if (acceleration_ === 5)
+			v = this.acc_z;
+		return cr.do_cmp(v, cmp_, angle_);
+	};
+	Cnds.prototype.OnNthTouchStart = function (touch_)
+	{
+		touch_ = Math.floor(touch_);
+		return touch_ === this.trigger_index;
+	};
+	Cnds.prototype.OnNthTouchEnd = function (touch_)
+	{
+		touch_ = Math.floor(touch_);
+		return touch_ === this.trigger_index;
+	};
+	Cnds.prototype.HasNthTouch = function (touch_)
+	{
+		touch_ = Math.floor(touch_);
+		return this.touches.length >= touch_ + 1;
+	};
+	Cnds.prototype.OnHoldGesture = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnTapGesture = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnDoubleTapGesture = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnHoldGestureObject = function (type)
+	{
+		if (!type)
+			return false;
+		return this.runtime.testAndSelectCanvasPointOverlap(type, this.curTouchX, this.curTouchY, false);
+	};
+	Cnds.prototype.OnTapGestureObject = function (type)
+	{
+		if (!type)
+			return false;
+		return this.runtime.testAndSelectCanvasPointOverlap(type, this.curTouchX, this.curTouchY, false);
+	};
+	Cnds.prototype.OnDoubleTapGestureObject = function (type)
+	{
+		if (!type)
+			return false;
+		return this.runtime.testAndSelectCanvasPointOverlap(type, this.curTouchX, this.curTouchY, false);
+	};
+	Cnds.prototype.OnPermissionGranted = function (type)
+	{
+		return this.trigger_permission === type;
+	};
+	Cnds.prototype.OnPermissionDenied = function (type)
+	{
+		return this.trigger_permission === type;
+	};
+	pluginProto.cnds = new Cnds();
+	function Acts() {};
+	Acts.prototype.RequestPermission = function (type)
+	{
+		var self = this;
+		var promise = Promise.resolve(true);
+		if (type === 0)		// orientation
+		{
+			if (window["DeviceOrientationEvent"] && window["DeviceOrientationEvent"]["requestPermission"])
+			{
+				promise = window["DeviceOrientationEvent"]["requestPermission"]()
+				.then(function (state)
+				{
+					return state === "granted";
+				});
+			}
+		}
+		else				// motion
+		{
+			if (window["DeviceMotionEvent"] && window["DeviceMotionEvent"]["requestPermission"])
+			{
+				promise = window["DeviceMotionEvent"]["requestPermission"]()
+				.then(function (state)
+				{
+					return state === "granted";
+				});
+			}
+		}
+		promise.then(function (result)
+		{
+			self.trigger_permission = type;
+			if (result)
+				self.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnPermissionGranted, self);
+			else
+				self.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnPermissionDenied, self);
+		});
+	};
+	pluginProto.acts = new Acts();
+	function Exps() {};
+	Exps.prototype.TouchCount = function (ret)
+	{
+		ret.set_int(this.touches.length);
+	};
+	Exps.prototype.X = function (ret, layerparam)
+	{
+		var index = this.getTouchIndex;
+		if (index < 0 || index >= this.touches.length)
+		{
+			ret.set_float(0);
+			return;
+		}
+		var layer, oldScale, oldZoomRate, oldParallaxX, oldAngle;
+		if (cr.is_undefined(layerparam))
+		{
+			layer = this.runtime.getLayerByNumber(0);
+			oldScale = layer.scale;
+			oldZoomRate = layer.zoomRate;
+			oldParallaxX = layer.parallaxX;
+			oldAngle = layer.angle;
+			layer.scale = 1;
+			layer.zoomRate = 1.0;
+			layer.parallaxX = 1.0;
+			layer.angle = 0;
+			ret.set_float(layer.canvasToLayer(this.touches[index].x, this.touches[index].y, true));
+			layer.scale = oldScale;
+			layer.zoomRate = oldZoomRate;
+			layer.parallaxX = oldParallaxX;
+			layer.angle = oldAngle;
+		}
+		else
+		{
+			if (cr.is_number(layerparam))
+				layer = this.runtime.getLayerByNumber(layerparam);
+			else
+				layer = this.runtime.getLayerByName(layerparam);
+			if (layer)
+				ret.set_float(layer.canvasToLayer(this.touches[index].x, this.touches[index].y, true));
+			else
+				ret.set_float(0);
+		}
+	};
+	Exps.prototype.XAt = function (ret, index, layerparam)
+	{
+		index = Math.floor(index);
+		if (index < 0 || index >= this.touches.length)
+		{
+			ret.set_float(0);
+			return;
+		}
+		var layer, oldScale, oldZoomRate, oldParallaxX, oldAngle;
+		if (cr.is_undefined(layerparam))
+		{
+			layer = this.runtime.getLayerByNumber(0);
+			oldScale = layer.scale;
+			oldZoomRate = layer.zoomRate;
+			oldParallaxX = layer.parallaxX;
+			oldAngle = layer.angle;
+			layer.scale = 1;
+			layer.zoomRate = 1.0;
+			layer.parallaxX = 1.0;
+			layer.angle = 0;
+			ret.set_float(layer.canvasToLayer(this.touches[index].x, this.touches[index].y, true));
+			layer.scale = oldScale;
+			layer.zoomRate = oldZoomRate;
+			layer.parallaxX = oldParallaxX;
+			layer.angle = oldAngle;
+		}
+		else
+		{
+			if (cr.is_number(layerparam))
+				layer = this.runtime.getLayerByNumber(layerparam);
+			else
+				layer = this.runtime.getLayerByName(layerparam);
+			if (layer)
+				ret.set_float(layer.canvasToLayer(this.touches[index].x, this.touches[index].y, true));
+			else
+				ret.set_float(0);
+		}
+	};
+	Exps.prototype.XForID = function (ret, id, layerparam)
+	{
+		var index = this.findTouch(id);
+		if (index < 0)
+		{
+			ret.set_float(0);
+			return;
+		}
+		var touch = this.touches[index];
+		var layer, oldScale, oldZoomRate, oldParallaxX, oldAngle;
+		if (cr.is_undefined(layerparam))
+		{
+			layer = this.runtime.getLayerByNumber(0);
+			oldScale = layer.scale;
+			oldZoomRate = layer.zoomRate;
+			oldParallaxX = layer.parallaxX;
+			oldAngle = layer.angle;
+			layer.scale = 1;
+			layer.zoomRate = 1.0;
+			layer.parallaxX = 1.0;
+			layer.angle = 0;
+			ret.set_float(layer.canvasToLayer(touch.x, touch.y, true));
+			layer.scale = oldScale;
+			layer.zoomRate = oldZoomRate;
+			layer.parallaxX = oldParallaxX;
+			layer.angle = oldAngle;
+		}
+		else
+		{
+			if (cr.is_number(layerparam))
+				layer = this.runtime.getLayerByNumber(layerparam);
+			else
+				layer = this.runtime.getLayerByName(layerparam);
+			if (layer)
+				ret.set_float(layer.canvasToLayer(touch.x, touch.y, true));
+			else
+				ret.set_float(0);
+		}
+	};
+	Exps.prototype.Y = function (ret, layerparam)
+	{
+		var index = this.getTouchIndex;
+		if (index < 0 || index >= this.touches.length)
+		{
+			ret.set_float(0);
+			return;
+		}
+		var layer, oldScale, oldZoomRate, oldParallaxY, oldAngle;
+		if (cr.is_undefined(layerparam))
+		{
+			layer = this.runtime.getLayerByNumber(0);
+			oldScale = layer.scale;
+			oldZoomRate = layer.zoomRate;
+			oldParallaxY = layer.parallaxY;
+			oldAngle = layer.angle;
+			layer.scale = 1;
+			layer.zoomRate = 1.0;
+			layer.parallaxY = 1.0;
+			layer.angle = 0;
+			ret.set_float(layer.canvasToLayer(this.touches[index].x, this.touches[index].y, false));
+			layer.scale = oldScale;
+			layer.zoomRate = oldZoomRate;
+			layer.parallaxY = oldParallaxY;
+			layer.angle = oldAngle;
+		}
+		else
+		{
+			if (cr.is_number(layerparam))
+				layer = this.runtime.getLayerByNumber(layerparam);
+			else
+				layer = this.runtime.getLayerByName(layerparam);
+			if (layer)
+				ret.set_float(layer.canvasToLayer(this.touches[index].x, this.touches[index].y, false));
+			else
+				ret.set_float(0);
+		}
+	};
+	Exps.prototype.YAt = function (ret, index, layerparam)
+	{
+		index = Math.floor(index);
+		if (index < 0 || index >= this.touches.length)
+		{
+			ret.set_float(0);
+			return;
+		}
+		var layer, oldScale, oldZoomRate, oldParallaxY, oldAngle;
+		if (cr.is_undefined(layerparam))
+		{
+			layer = this.runtime.getLayerByNumber(0);
+			oldScale = layer.scale;
+			oldZoomRate = layer.zoomRate;
+			oldParallaxY = layer.parallaxY;
+			oldAngle = layer.angle;
+			layer.scale = 1;
+			layer.zoomRate = 1.0;
+			layer.parallaxY = 1.0;
+			layer.angle = 0;
+			ret.set_float(layer.canvasToLayer(this.touches[index].x, this.touches[index].y, false));
+			layer.scale = oldScale;
+			layer.zoomRate = oldZoomRate;
+			layer.parallaxY = oldParallaxY;
+			layer.angle = oldAngle;
+		}
+		else
+		{
+			if (cr.is_number(layerparam))
+				layer = this.runtime.getLayerByNumber(layerparam);
+			else
+				layer = this.runtime.getLayerByName(layerparam);
+			if (layer)
+				ret.set_float(layer.canvasToLayer(this.touches[index].x, this.touches[index].y, false));
+			else
+				ret.set_float(0);
+		}
+	};
+	Exps.prototype.YForID = function (ret, id, layerparam)
+	{
+		var index = this.findTouch(id);
+		if (index < 0)
+		{
+			ret.set_float(0);
+			return;
+		}
+		var touch = this.touches[index];
+		var layer, oldScale, oldZoomRate, oldParallaxY, oldAngle;
+		if (cr.is_undefined(layerparam))
+		{
+			layer = this.runtime.getLayerByNumber(0);
+			oldScale = layer.scale;
+			oldZoomRate = layer.zoomRate;
+			oldParallaxY = layer.parallaxY;
+			oldAngle = layer.angle;
+			layer.scale = 1;
+			layer.zoomRate = 1.0;
+			layer.parallaxY = 1.0;
+			layer.angle = 0;
+			ret.set_float(layer.canvasToLayer(touch.x, touch.y, false));
+			layer.scale = oldScale;
+			layer.zoomRate = oldZoomRate;
+			layer.parallaxY = oldParallaxY;
+			layer.angle = oldAngle;
+		}
+		else
+		{
+			if (cr.is_number(layerparam))
+				layer = this.runtime.getLayerByNumber(layerparam);
+			else
+				layer = this.runtime.getLayerByName(layerparam);
+			if (layer)
+				ret.set_float(layer.canvasToLayer(touch.x, touch.y, false));
+			else
+				ret.set_float(0);
+		}
+	};
+	Exps.prototype.AbsoluteX = function (ret)
+	{
+		if (this.touches.length)
+			ret.set_float(this.touches[0].x);
+		else
+			ret.set_float(0);
+	};
+	Exps.prototype.AbsoluteXAt = function (ret, index)
+	{
+		index = Math.floor(index);
+		if (index < 0 || index >= this.touches.length)
+		{
+			ret.set_float(0);
+			return;
+		}
+		ret.set_float(this.touches[index].x);
+	};
+	Exps.prototype.AbsoluteXForID = function (ret, id)
+	{
+		var index = this.findTouch(id);
+		if (index < 0)
+		{
+			ret.set_float(0);
+			return;
+		}
+		var touch = this.touches[index];
+		ret.set_float(touch.x);
+	};
+	Exps.prototype.AbsoluteY = function (ret)
+	{
+		if (this.touches.length)
+			ret.set_float(this.touches[0].y);
+		else
+			ret.set_float(0);
+	};
+	Exps.prototype.AbsoluteYAt = function (ret, index)
+	{
+		index = Math.floor(index);
+		if (index < 0 || index >= this.touches.length)
+		{
+			ret.set_float(0);
+			return;
+		}
+		ret.set_float(this.touches[index].y);
+	};
+	Exps.prototype.AbsoluteYForID = function (ret, id)
+	{
+		var index = this.findTouch(id);
+		if (index < 0)
+		{
+			ret.set_float(0);
+			return;
+		}
+		var touch = this.touches[index];
+		ret.set_float(touch.y);
+	};
+	Exps.prototype.SpeedAt = function (ret, index)
+	{
+		index = Math.floor(index);
+		if (index < 0 || index >= this.touches.length)
+		{
+			ret.set_float(0);
+			return;
+		}
+		var t = this.touches[index];
+		var dist = cr.distanceTo(t.x, t.y, t.lastx, t.lasty);
+		var timediff = (t.time - t.lasttime) / 1000;
+		if (timediff <= 0)
+			ret.set_float(0);
+		else
+			ret.set_float(dist / timediff);
+	};
+	Exps.prototype.SpeedForID = function (ret, id)
+	{
+		var index = this.findTouch(id);
+		if (index < 0)
+		{
+			ret.set_float(0);
+			return;
+		}
+		var touch = this.touches[index];
+		var dist = cr.distanceTo(touch.x, touch.y, touch.lastx, touch.lasty);
+		var timediff = (touch.time - touch.lasttime) / 1000;
+		if (timediff <= 0)
+			ret.set_float(0);
+		else
+			ret.set_float(dist / timediff);
+	};
+	Exps.prototype.AngleAt = function (ret, index)
+	{
+		index = Math.floor(index);
+		if (index < 0 || index >= this.touches.length)
+		{
+			ret.set_float(0);
+			return;
+		}
+		var t = this.touches[index];
+		ret.set_float(cr.to_degrees(cr.angleTo(t.lastx, t.lasty, t.x, t.y)));
+	};
+	Exps.prototype.AngleForID = function (ret, id)
+	{
+		var index = this.findTouch(id);
+		if (index < 0)
+		{
+			ret.set_float(0);
+			return;
+		}
+		var touch = this.touches[index];
+		ret.set_float(cr.to_degrees(cr.angleTo(touch.lastx, touch.lasty, touch.x, touch.y)));
+	};
+	Exps.prototype.Alpha = function (ret)
+	{
+		ret.set_float(this.getAlpha());
+	};
+	Exps.prototype.Beta = function (ret)
+	{
+		ret.set_float(this.getBeta());
+	};
+	Exps.prototype.Gamma = function (ret)
+	{
+		ret.set_float(this.getGamma());
+	};
+	Exps.prototype.AccelerationXWithG = function (ret)
+	{
+		ret.set_float(this.acc_g_x);
+	};
+	Exps.prototype.AccelerationYWithG = function (ret)
+	{
+		ret.set_float(this.acc_g_y);
+	};
+	Exps.prototype.AccelerationZWithG = function (ret)
+	{
+		ret.set_float(this.acc_g_z);
+	};
+	Exps.prototype.AccelerationX = function (ret)
+	{
+		ret.set_float(this.acc_x);
+	};
+	Exps.prototype.AccelerationY = function (ret)
+	{
+		ret.set_float(this.acc_y);
+	};
+	Exps.prototype.AccelerationZ = function (ret)
+	{
+		ret.set_float(this.acc_z);
+	};
+	Exps.prototype.TouchIndex = function (ret)
+	{
+		ret.set_int(this.trigger_index);
+	};
+	Exps.prototype.TouchID = function (ret)
+	{
+		ret.set_float(this.trigger_id);
+	};
+	Exps.prototype.WidthForID = function (ret, id)
+	{
+		var index = this.findTouch(id);
+		if (index < 0)
+		{
+			ret.set_float(0);
+			return;
+		}
+		var touch = this.touches[index];
+		ret.set_float(touch.width);
+	};
+	Exps.prototype.HeightForID = function (ret, id)
+	{
+		var index = this.findTouch(id);
+		if (index < 0)
+		{
+			ret.set_float(0);
+			return;
+		}
+		var touch = this.touches[index];
+		ret.set_float(touch.height);
+	};
+	Exps.prototype.PressureForID = function (ret, id)
+	{
+		var index = this.findTouch(id);
+		if (index < 0)
+		{
+			ret.set_float(0);
+			return;
+		}
+		var touch = this.touches[index];
+		ret.set_float(touch.pressure);
+	};
+	pluginProto.exps = new Exps();
+}());
+;
+;
+cr.behaviors.DragnDrop = function(runtime)
+{
+	this.runtime = runtime;
+	var self = this;
+	if (!this.runtime.isDomFree)
+	{
+		jQuery(document).mousemove(
+			function(info) {
+				self.onMouseMove(info);
+			}
+		);
+		jQuery(document).mousedown(
+			function(info) {
+				self.onMouseDown(info);
+			}
+		);
+		jQuery(document).mouseup(
+			function(info) {
+				self.onMouseUp(info);
+			}
+		);
+	}
+	var elem = (this.runtime.fullscreen_mode > 0) ? document : this.runtime.canvas;
+	if (this.runtime.isDirectCanvas)
+		elem = window["Canvas"];
+	else if (this.runtime.isCocoonJs)
+		elem = window;
+	if (typeof PointerEvent !== "undefined")
+	{
+		elem.addEventListener("pointerdown",
+			function(info) {
+				self.onPointerStart(info);
+			},
+			false
+		);
+		elem.addEventListener("pointermove",
+			function(info) {
+				self.onPointerMove(info);
+			},
+			false
+		);
+		elem.addEventListener("pointerup",
+			function(info) {
+				self.onPointerEnd(info);
+			},
+			false
+		);
+		elem.addEventListener("pointercancel",
+			function(info) {
+				self.onPointerEnd(info);
+			},
+			false
+		);
+	}
+	else if (window.navigator["msPointerEnabled"])
+	{
+		elem.addEventListener("MSPointerDown",
+			function(info) {
+				self.onPointerStart(info);
+			},
+			false
+		);
+		elem.addEventListener("MSPointerMove",
+			function(info) {
+				self.onPointerMove(info);
+			},
+			false
+		);
+		elem.addEventListener("MSPointerUp",
+			function(info) {
+				self.onPointerEnd(info);
+			},
+			false
+		);
+		elem.addEventListener("MSPointerCancel",
+			function(info) {
+				self.onPointerEnd(info);
+			},
+			false
+		);
+	}
+	else
+	{
+		elem.addEventListener("touchstart",
+			function(info) {
+				self.onTouchStart(info);
+			},
+			false
+		);
+		elem.addEventListener("touchmove",
+			function(info) {
+				self.onTouchMove(info);
+			},
+			false
+		);
+		elem.addEventListener("touchend",
+			function(info) {
+				self.onTouchEnd(info);
+			},
+			false
+		);
+		elem.addEventListener("touchcancel",
+			function(info) {
+				self.onTouchEnd(info);
+			},
+			false
+		);
+	}
+};
+(function ()
+{
+	var behaviorProto = cr.behaviors.DragnDrop.prototype;
+	var dummyoffset = {left: 0, top: 0};
+	function GetDragDropBehavior(inst)
+	{
+		var i, len;
+		for (i = 0, len = inst.behavior_insts.length; i < len; i++)
+		{
+			if (inst.behavior_insts[i] instanceof behaviorProto.Instance)
+				return inst.behavior_insts[i];
+		}
+		return null;
+	};
+	behaviorProto.onMouseDown = function (info)
+	{
+		if (info.which !== 1)
+			return;		// not left mouse button
+		this.onInputDown("leftmouse", info.pageX, info.pageY);
+	};
+	behaviorProto.onMouseMove = function (info)
+	{
+		if (info.which !== 1)
+			return;		// not left mouse button
+		this.onInputMove("leftmouse", info.pageX, info.pageY);
+	};
+	behaviorProto.onMouseUp = function (info)
+	{
+		if (info.which !== 1)
+			return;		// not left mouse button
+		this.onInputUp("leftmouse");
+	};
+	behaviorProto.onTouchStart = function (info)
+	{
+		if (info.preventDefault && cr.isCanvasInputEvent(info))
+			info.preventDefault();
+		var i, len, t, id;
+		for (i = 0, len = info.changedTouches.length; i < len; i++)
+		{
+			t = info.changedTouches[i];
+			id = t.identifier;
+			this.onInputDown(id ? id.toString() : "<none>", t.pageX, t.pageY);
+		}
+	};
+	behaviorProto.onTouchMove = function (info)
+	{
+		if (info.preventDefault)
+			info.preventDefault();
+		var i, len, t, id;
+		for (i = 0, len = info.changedTouches.length; i < len; i++)
+		{
+			t = info.changedTouches[i];
+			id = t.identifier;
+			this.onInputMove(id ? id.toString() : "<none>", t.pageX, t.pageY);
+		}
+	};
+	behaviorProto.onTouchEnd = function (info)
+	{
+		if (info.preventDefault && cr.isCanvasInputEvent(info))
+			info.preventDefault();
+		var i, len, t, id;
+		for (i = 0, len = info.changedTouches.length; i < len; i++)
+		{
+			t = info.changedTouches[i];
+			id = t.identifier;
+			this.onInputUp(id ? id.toString() : "<none>");
+		}
+	};
+	behaviorProto.onPointerStart = function (info)
+	{
+		if (info["pointerType"] === info["MSPOINTER_TYPE_MOUSE"] || info["pointerType"] === "mouse")
+			return;
+		if (info.preventDefault && cr.isCanvasInputEvent(info))
+			info.preventDefault();
+		this.onInputDown(info["pointerId"].toString(), info.pageX, info.pageY);
+	};
+	behaviorProto.onPointerMove = function (info)
+	{
+		if (info["pointerType"] === info["MSPOINTER_TYPE_MOUSE"] || info["pointerType"] === "mouse")
+			return;
+		if (info.preventDefault)
+			info.preventDefault();
+		this.onInputMove(info["pointerId"].toString(), info.pageX, info.pageY);
+	};
+	behaviorProto.onPointerEnd = function (info)
+	{
+		if (info["pointerType"] === info["MSPOINTER_TYPE_MOUSE"] || info["pointerType"] === "mouse")
+			return;
+		if (info.preventDefault && cr.isCanvasInputEvent(info))
+			info.preventDefault();
+		this.onInputUp(info["pointerId"].toString());
+	};
+	behaviorProto.onInputDown = function (src, pageX, pageY)
+	{
+		var offset = this.runtime.isDomFree ? dummyoffset : jQuery(this.runtime.canvas).offset();
+		var x = pageX - offset.left;
+		var y = pageY - offset.top;
+		var lx, ly, topx, topy;
+		var arr = this.my_instances.valuesRef();
+		var i, len, b, inst, topmost = null;
+		for (i = 0, len = arr.length; i < len; i++)
+		{
+			inst = arr[i];
+			b = GetDragDropBehavior(inst);
+			if (!b.enabled || b.dragging)
+				continue;		// don't consider disabled or already-dragging instances
+			lx = inst.layer.canvasToLayer(x, y, true);
+			ly = inst.layer.canvasToLayer(x, y, false);
+			inst.update_bbox();
+			if (!inst.contains_pt(lx, ly))
+				continue;		// don't consider instances not over this point
+			if (!topmost)
+			{
+				topmost = inst;
+				topx = lx;
+				topy = ly;
+				continue;
+			}
+			if (inst.layer.index > topmost.layer.index)
+			{
+				topmost = inst;
+				topx = lx;
+				topy = ly;
+				continue;
+			}
+			if (inst.layer.index === topmost.layer.index && inst.get_zindex() > topmost.get_zindex())
+			{
+				topmost = inst;
+				topx = lx;
+				topy = ly;
+				continue;
+			}
+		}
+		if (topmost)
+			GetDragDropBehavior(topmost).onDown(src, topx, topy);
+	};
+	behaviorProto.onInputMove = function (src, pageX, pageY)
+	{
+		var offset = this.runtime.isDomFree ? dummyoffset : jQuery(this.runtime.canvas).offset();
+		var x = pageX - offset.left;
+		var y = pageY - offset.top;
+		var lx, ly;
+		var arr = this.my_instances.valuesRef();
+		var i, len, b, inst;
+		for (i = 0, len = arr.length; i < len; i++)
+		{
+			inst = arr[i];
+			b = GetDragDropBehavior(inst);
+			if (!b.enabled || !b.dragging || (b.dragging && b.dragsource !== src))
+				continue;		// don't consider disabled, not-dragging, or dragging by other sources
+			lx = inst.layer.canvasToLayer(x, y, true);
+			ly = inst.layer.canvasToLayer(x, y, false);
+			b.onMove(lx, ly);
+		}
+	};
+	behaviorProto.onInputUp = function (src)
+	{
+		var arr = this.my_instances.valuesRef();
+		var i, len, b, inst;
+		for (i = 0, len = arr.length; i < len; i++)
+		{
+			inst = arr[i];
+			b = GetDragDropBehavior(inst);
+			if (b.dragging && b.dragsource === src)
+				b.onUp();
+		}
+	};
 	behaviorProto.Type = function(behavior, objtype)
 	{
 		this.behavior = behavior;
@@ -19813,214 +22129,104 @@ cr.behaviors.Bullet = function(runtime)
 	var behinstProto = behaviorProto.Instance.prototype;
 	behinstProto.onCreate = function()
 	{
-		var speed = this.properties[0];
-		this.acc = this.properties[1];
-		this.g = this.properties[2];
-		this.bounceOffSolid = (this.properties[3] !== 0);
-		this.setAngle = (this.properties[4] !== 0);
-		this.dx = Math.cos(this.inst.angle) * speed;
-		this.dy = Math.sin(this.inst.angle) * speed;
-		this.lastx = this.inst.x;
-		this.lasty = this.inst.y;
-		this.lastKnownAngle = this.inst.angle;
-		this.travelled = 0;
-		this.enabled = (this.properties[5] !== 0);
+		this.dragging = false;
+		this.dx = 0;
+		this.dy = 0;
+		this.dragsource = "<none>";
+		this.axes = this.properties[0];
+		this.enabled = (this.properties[1] !== 0);
 	};
 	behinstProto.saveToJSON = function ()
 	{
-		return {
-			"acc": this.acc,
-			"g": this.g,
-			"dx": this.dx,
-			"dy": this.dy,
-			"lx": this.lastx,
-			"ly": this.lasty,
-			"lka": this.lastKnownAngle,
-			"t": this.travelled,
-			"e": this.enabled
-		};
+		return { "enabled": this.enabled };
 	};
 	behinstProto.loadFromJSON = function (o)
 	{
-		this.acc = o["acc"];
-		this.g = o["g"];
-		this.dx = o["dx"];
-		this.dy = o["dy"];
-		this.lastx = o["lx"];
-		this.lasty = o["ly"];
-		this.lastKnownAngle = o["lka"];
-		this.travelled = o["t"];
-		this.enabled = o["e"];
+		this.enabled = o["enabled"];
+		this.dragging = false;
+	};
+	behinstProto.onDown = function(src, x, y)
+	{
+		this.dx = x - this.inst.x;
+		this.dy = y - this.inst.y;
+		this.dragging = true;
+		this.dragsource = src;
+		this.runtime.isInUserInputEvent = true;
+		this.runtime.trigger(cr.behaviors.DragnDrop.prototype.cnds.OnDragStart, this.inst);
+		this.runtime.isInUserInputEvent = false;
+	};
+	behinstProto.onMove = function(x, y)
+	{
+		var newx = x - this.dx;
+		var newy = y - this.dy;
+		if (this.axes === 0)		// both
+		{
+			if (this.inst.x !== newx || this.inst.y !== newy)
+			{
+				this.inst.x = newx;
+				this.inst.y = newy;
+				this.inst.set_bbox_changed();
+			}
+		}
+		else if (this.axes === 1)	// horizontal
+		{
+			if (this.inst.x !== newx)
+			{
+				this.inst.x = newx;
+				this.inst.set_bbox_changed();
+			}
+		}
+		else if (this.axes === 2)	// vertical
+		{
+			if (this.inst.y !== newy)
+			{
+				this.inst.y = newy;
+				this.inst.set_bbox_changed();
+			}
+		}
+	};
+	behinstProto.onUp = function()
+	{
+		this.dragging = false;
+		this.runtime.isInUserInputEvent = true;
+		this.runtime.trigger(cr.behaviors.DragnDrop.prototype.cnds.OnDrop, this.inst);
+		this.runtime.isInUserInputEvent = false;
 	};
 	behinstProto.tick = function ()
 	{
-		if (!this.enabled)
-			return;
-		var dt = this.runtime.getDt(this.inst);
-		var s, a;
-		var bounceSolid, bounceAngle;
-		if (this.inst.angle !== this.lastKnownAngle)
-		{
-			if (this.setAngle)
-			{
-				s = cr.distanceTo(0, 0, this.dx, this.dy);
-				this.dx = Math.cos(this.inst.angle) * s;
-				this.dy = Math.sin(this.inst.angle) * s;
-			}
-			this.lastKnownAngle = this.inst.angle;
-		}
-		if (this.acc !== 0)
-		{
-			s = cr.distanceTo(0, 0, this.dx, this.dy);
-			if (this.dx === 0 && this.dy === 0)
-				a = this.inst.angle;
-			else
-				a = cr.angleTo(0, 0, this.dx, this.dy);
-			s += this.acc * dt;
-			if (s < 0)
-				s = 0;
-			this.dx = Math.cos(a) * s;
-			this.dy = Math.sin(a) * s;
-		}
-		if (this.g !== 0)
-			this.dy += this.g * dt;
-		this.lastx = this.inst.x;
-		this.lasty = this.inst.y;
-		if (this.dx !== 0 || this.dy !== 0)
-		{
-			this.inst.x += this.dx * dt;
-			this.inst.y += this.dy * dt;
-			this.travelled += cr.distanceTo(0, 0, this.dx * dt, this.dy * dt)
-			if (this.setAngle)
-			{
-				this.inst.angle = cr.angleTo(0, 0, this.dx, this.dy);
-				this.inst.set_bbox_changed();
-				this.lastKnownAngle = this.inst.angle;
-			}
-			this.inst.set_bbox_changed();
-			if (this.bounceOffSolid)
-			{
-				bounceSolid = this.runtime.testOverlapSolid(this.inst);
-				if (bounceSolid)
-				{
-					this.runtime.registerCollision(this.inst, bounceSolid);
-					s = cr.distanceTo(0, 0, this.dx, this.dy);
-					bounceAngle = this.runtime.calculateSolidBounceAngle(this.inst, this.lastx, this.lasty);
-					this.dx = Math.cos(bounceAngle) * s;
-					this.dy = Math.sin(bounceAngle) * s;
-					this.inst.x += this.dx * dt;			// move out for one tick since the object can't have spent a tick in the solid
-					this.inst.y += this.dy * dt;
-					this.inst.set_bbox_changed();
-					if (this.setAngle)
-					{
-						this.inst.angle = bounceAngle;
-						this.lastKnownAngle = bounceAngle;
-						this.inst.set_bbox_changed();
-					}
-					if (!this.runtime.pushOutSolid(this.inst, this.dx / s, this.dy / s, Math.max(s * 2.5 * dt, 30)))
-						this.runtime.pushOutSolidNearest(this.inst, 100);
-				}
-			}
-		}
 	};
 	function Cnds() {};
-	Cnds.prototype.CompareSpeed = function (cmp, s)
+	Cnds.prototype.IsDragging = function ()
 	{
-		return cr.do_cmp(cr.distanceTo(0, 0, this.dx, this.dy), cmp, s);
+		return this.dragging;
 	};
-	Cnds.prototype.CompareTravelled = function (cmp, d)
+	Cnds.prototype.OnDragStart = function ()
 	{
-		return cr.do_cmp(this.travelled, cmp, d);
+		return true;
+	};
+	Cnds.prototype.OnDrop = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.IsEnabled = function ()
+	{
+		return !!this.enabled;
 	};
 	behaviorProto.cnds = new Cnds();
 	function Acts() {};
-	Acts.prototype.SetSpeed = function (s)
+	Acts.prototype.SetEnabled = function (s)
 	{
-		var a = cr.angleTo(0, 0, this.dx, this.dy);
-		this.dx = Math.cos(a) * s;
-		this.dy = Math.sin(a) * s;
+		this.enabled = (s !== 0);
+		if (!this.enabled)
+			this.dragging = false;
 	};
-	Acts.prototype.SetAcceleration = function (a)
+	Acts.prototype.Drop = function ()
 	{
-		this.acc = a;
-	};
-	Acts.prototype.SetGravity = function (g)
-	{
-		this.g = g;
-	};
-	Acts.prototype.SetAngleOfMotion = function (a)
-	{
-		a = cr.to_radians(a);
-		var s = cr.distanceTo(0, 0, this.dx, this.dy)
-		this.dx = Math.cos(a) * s;
-		this.dy = Math.sin(a) * s;
-	};
-	Acts.prototype.Bounce = function (objtype)
-	{
-		if (!objtype)
-			return;
-		var otherinst = objtype.getFirstPicked(this.inst);
-		if (!otherinst)
-			return;
-		var dt = this.runtime.getDt(this.inst);
-		var s = cr.distanceTo(0, 0, this.dx, this.dy);
-		var bounceAngle = this.runtime.calculateSolidBounceAngle(this.inst, this.lastx, this.lasty, otherinst);
-		this.dx = Math.cos(bounceAngle) * s;
-		this.dy = Math.sin(bounceAngle) * s;
-		this.inst.x += this.dx * dt;			// move out for one tick since the object can't have spent a tick in the solid
-		this.inst.y += this.dy * dt;
-		this.inst.set_bbox_changed();
-		if (this.setAngle)
-		{
-			this.inst.angle = bounceAngle;
-			this.lastKnownAngle = bounceAngle;
-			this.inst.set_bbox_changed();
-		}
-		if (s !== 0)		// prevent divide-by-zero
-		{
-			if (this.bounceOffSolid)
-			{
-				if (!this.runtime.pushOutSolid(this.inst, this.dx / s, this.dy / s, Math.max(s * 2.5 * dt, 30)))
-					this.runtime.pushOutSolidNearest(this.inst, 100);
-			}
-			else
-			{
-				this.runtime.pushOut(this.inst, this.dx / s, this.dy / s, Math.max(s * 2.5 * dt, 30), otherinst)
-			}
-		}
-	};
-	Acts.prototype.SetDistanceTravelled = function (d)
-	{
-		this.travelled = d;
-	};
-	Acts.prototype.SetEnabled = function (en)
-	{
-		this.enabled = (en === 1);
+		if (this.dragging)
+			this.onUp();
 	};
 	behaviorProto.acts = new Acts();
 	function Exps() {};
-	Exps.prototype.Speed = function (ret)
-	{
-		var s = cr.distanceTo(0, 0, this.dx, this.dy);
-		s = cr.round6dp(s);
-		ret.set_float(s);
-	};
-	Exps.prototype.Acceleration = function (ret)
-	{
-		ret.set_float(this.acc);
-	};
-	Exps.prototype.AngleOfMotion = function (ret)
-	{
-		ret.set_float(cr.to_degrees(cr.angleTo(0, 0, this.dx, this.dy)));
-	};
-	Exps.prototype.DistanceTravelled = function (ret)
-	{
-		ret.set_float(this.travelled);
-	};
-	Exps.prototype.Gravity = function (ret)
-	{
-		ret.set_float(this.g);
-	};
 	behaviorProto.exps = new Exps();
 }());
 ;
@@ -20656,6 +22862,1014 @@ cr.behaviors.Fade = function(runtime)
 }());
 ;
 ;
+cr.behaviors.LOS = function(runtime)
+{
+	this.runtime = runtime;
+};
+(function ()
+{
+	var behaviorProto = cr.behaviors.LOS.prototype;
+	behaviorProto.Type = function(behavior, objtype)
+	{
+		this.behavior = behavior;
+		this.objtype = objtype;
+		this.runtime = behavior.runtime;
+	};
+	var behtypeProto = behaviorProto.Type.prototype;
+	behtypeProto.onCreate = function()
+	{
+		this.obstacleTypes = [];						// object types to check for as obstructions
+	};
+	behtypeProto.findLosBehavior = function (inst)
+	{
+		var i, len, b;
+		for (i = 0, len = inst.behavior_insts.length; i < len; ++i)
+		{
+			b = inst.behavior_insts[i];
+			if (b instanceof cr.behaviors.LOS.prototype.Instance && b.type === this)
+				return b;
+		}
+		return null;
+	};
+	behaviorProto.Instance = function(type, inst)
+	{
+		this.type = type;
+		this.behavior = type.behavior;
+		this.inst = inst;				// associated object instance to modify
+		this.runtime = type.runtime;
+	};
+	var behinstProto = behaviorProto.Instance.prototype;
+	behinstProto.onCreate = function()
+	{
+		this.obstacleMode = this.properties[0];		// 0 = solids, 1 = custom
+		this.range = this.properties[1];
+		this.cone = cr.to_radians(this.properties[2]);
+		this.useCollisionCells = (this.properties[3] !== 0);
+	};
+	behinstProto.onDestroy = function ()
+	{
+	};
+	behinstProto.saveToJSON = function ()
+	{
+		var o = {
+			"r": this.range,
+			"c": this.cone,
+			"t": []
+		};
+		var i, len;
+		for (i = 0, len = this.type.obstacleTypes.length; i < len; i++)
+		{
+			o["t"].push(this.type.obstacleTypes[i].sid);
+		}
+		return o;
+	};
+	behinstProto.loadFromJSON = function (o)
+	{
+		this.range = o["r"];
+		this.cone = o["c"];
+		cr.clearArray(this.type.obstacleTypes);
+		var i, len, t;
+		for (i = 0, len = o["t"].length; i < len; i++)
+		{
+			t = this.runtime.getObjectTypeBySid(o["t"][i]);
+			if (t)
+				this.type.obstacleTypes.push(t);
+		}
+	};
+	behinstProto.tick = function ()
+	{
+	};
+	var candidates = [];
+	var tmpRect = new cr.rect(0, 0, 0, 0);
+	behinstProto.hasLOSto = function (x_, y_)
+	{
+		var startx = this.inst.x;
+		var starty = this.inst.y;
+		var myangle = this.inst.angle;
+		if (this.inst.width < 0)
+			myangle += Math.PI;
+		if (cr.distanceTo(startx, starty, x_, y_) > this.range)
+			return false;		// too far away
+		var a = cr.angleTo(startx, starty, x_, y_);
+		if (cr.angleDiff(myangle, a) > this.cone / 2)
+			return false;		// outside cone of view
+		var i, leni, rinst, solid;
+		tmpRect.set(startx, starty, x_, y_);
+		tmpRect.normalize();
+		if (this.obstacleMode === 0)
+		{
+			if (this.useCollisionCells)
+			{
+				this.runtime.getSolidCollisionCandidates(this.inst.layer, tmpRect, candidates);
+			}
+			else
+			{
+				solid = this.runtime.getSolidBehavior();
+				if (solid)
+					cr.appendArray(candidates, solid.my_instances.valuesRef());
+			}
+			for (i = 0, leni = candidates.length; i < leni; ++i)
+			{
+				rinst = candidates[i];
+				if (!rinst.extra["solidEnabled"] || rinst === this.inst)
+					continue;
+				if (this.runtime.testSegmentOverlap(startx, starty, x_, y_, rinst))
+				{
+					cr.clearArray(candidates);
+					return false;
+				}
+			}
+		}
+		else
+		{
+			if (this.useCollisionCells)
+			{
+				this.runtime.getTypesCollisionCandidates(this.inst.layer, this.type.obstacleTypes, tmpRect, candidates);
+			}
+			else
+			{
+				for (i = 0, leni = this.type.obstacleTypes.length; i < leni; ++i)
+				{
+					cr.appendArray(candidates, this.type.obstacleTypes[i].instances);
+				}
+			}
+			for (i = 0, leni = candidates.length; i < leni; ++i)
+			{
+				rinst = candidates[i];
+				if (rinst === this.inst)
+					continue;
+				if (this.runtime.testSegmentOverlap(startx, starty, x_, y_, rinst))
+				{
+					cr.clearArray(candidates);
+					return false;
+				}
+			}
+		}
+		cr.clearArray(candidates);
+		return true;
+	};
+	function Cnds() {};
+	var ltopick = new cr.ObjectSet();
+	var rtopick = new cr.ObjectSet();
+	Cnds.prototype.HasLOSToObject = function (obj_)
+	{
+		if (!obj_)
+			return false;
+		var i, j, leni, lenj, linst, losbeh, rinst, pick;
+		var lsol = this.runtime.getCurrentConditionObjectType().getCurrentSol();
+		var rsol = obj_.getCurrentSol();
+		var linstances = lsol.getObjects();
+		var rinstances = rsol.getObjects();
+		if (lsol.select_all)
+			cr.clearArray(lsol.else_instances);
+		if (rsol.select_all)
+			cr.clearArray(rsol.else_instances);
+		var inverted = this.runtime.getCurrentCondition().inverted;
+		for (i = 0, leni = linstances.length; i < leni; ++i)
+		{
+			linst = linstances[i];
+			pick = false;
+			losbeh = this.findLosBehavior(linst);
+;
+			for (j = 0, lenj = rinstances.length; j < lenj; ++j)
+			{
+				rinst = rinstances[j];
+				if (linst !== rinst && cr.xor(losbeh.hasLOSto(rinst.x, rinst.y), inverted))
+				{
+					pick = true;
+					rtopick.add(rinst);
+				}
+			}
+			if (pick)
+				ltopick.add(linst);
+		}
+		var lpicks = ltopick.valuesRef();
+		var rpicks = rtopick.valuesRef();
+		lsol.select_all = false;
+		rsol.select_all = false;
+		cr.shallowAssignArray(lsol.instances, lpicks);
+		cr.shallowAssignArray(rsol.instances, rpicks);
+		ltopick.clear();
+		rtopick.clear();
+		return lsol.hasObjects();
+	};
+	Cnds.prototype.HasLOSToPosition = function (x_, y_)
+	{
+		return this.hasLOSto(x_, y_);
+	};
+	behaviorProto.cnds = new Cnds();
+	function Acts() {};
+	Acts.prototype.SetRange = function (r)
+	{
+		this.range = r;
+	};
+	Acts.prototype.SetCone = function (c)
+	{
+		this.cone = cr.to_radians(c);
+	};
+	Acts.prototype.AddObstacle = function (obj_)
+	{
+		var obstacleTypes = this.type.obstacleTypes;
+		if (obstacleTypes.indexOf(obj_) !== -1)
+			return;
+		var i, len, t;
+		for (i = 0, len = obstacleTypes.length; i < len; i++)
+		{
+			t = obstacleTypes[i];
+			if (t.is_family && t.members.indexOf(obj_) !== -1)
+				return;
+		}
+		obstacleTypes.push(obj_);
+	};
+	Acts.prototype.ClearObstacles = function ()
+	{
+		cr.clearArray(this.type.obstacleTypes);
+	};
+	behaviorProto.acts = new Acts();
+	function Exps() {};
+	Exps.prototype.Range = function (ret)
+	{
+		ret.set_float(this.range);
+	};
+	Exps.prototype.ConeOfView = function (ret)
+	{
+		ret.set_float(cr.to_degrees(this.cone));
+	};
+	behaviorProto.exps = new Exps();
+}());
+;
+;
+cr.behaviors.Pathfinding = function(runtime)
+{
+	this.runtime = runtime;
+};
+(function ()
+{
+	var cellData = {};
+	var behaviorProto = cr.behaviors.Pathfinding.prototype;
+	behaviorProto.onBeforeLayoutChange = function ()
+	{
+		var p, d;
+		for (p in cellData)
+		{
+			if (cellData.hasOwnProperty(p))
+			{
+				d = cellData[p];
+				d.pathfinder["unsetReady"]();
+				d.regenerate = true;
+			}
+		}
+	};
+	behaviorProto.Type = function(behavior, objtype)
+	{
+		this.behavior = behavior;
+		this.objtype = objtype;
+		this.runtime = behavior.runtime;
+	};
+	var behtypeProto = behaviorProto.Type.prototype;
+	behtypeProto.onCreate = function()
+	{
+		this.obstacleTypes = [];		// object types to treat as obstacles in custom mode
+		this.costTypes = [];			// object types with cost: { obj: type, cost: n }
+	};
+	behaviorProto.Instance = function(type, inst)
+	{
+		this.type = type;
+		this.behavior = type.behavior;
+		this.inst = inst;				// associated object instance to modify
+		this.runtime = type.runtime;
+	};
+	var behinstProto = behaviorProto.Instance.prototype;
+	behinstProto.onCreate = function()
+	{
+		this.cellSize = this.properties[0];
+		if (this.cellSize < 3)
+			this.cellSize = 3;
+		this.cellBorder = this.properties[1];
+		this.obstacles = this.properties[2];		// 0 = solids, 1 = custom
+		this.maxSpeed = this.properties[3];
+		this.acc = this.properties[4];
+		this.dec = this.properties[5];
+		this.av = cr.to_radians(this.properties[6]);
+		this.rotateEnabled = (this.properties[7] !== 0);
+		this.diagonalsEnabled = (this.properties[8] !== 0);
+		this.enabled = (this.properties[9] !== 0);
+		this.isMoving = false;
+		this.movingFromStopped = false;
+		this.firstTickMovingWhileMoving = false;
+		this.hasPath = false;
+		this.moveNode = 0;
+		this.a = this.inst.angle;
+		this.lastKnownAngle = this.inst.angle;
+		this.s = 0;
+		this.rabbitX = 0;
+		this.rabbitY = 0;
+		this.rabbitA = 0;
+		this.myHcells = Math.ceil(this.runtime.running_layout.width / this.cellSize);
+		this.myVcells = Math.ceil(this.runtime.running_layout.height / this.cellSize);
+		this.myPath = [];				// copy of path returned from pathfinder
+		this.delayFindPath = false;
+		this.delayPathX = 0;
+		this.delayPathY = 0;
+		this.is_destroyed = false;
+		this.isCalculating = false;
+		this.calcPathX = 0;
+		this.calcPathY = 0;
+		this.firstRun = true;
+		var self = this;
+		if (!this.recycled)
+		{
+			this.pathSuccessFn = function ()
+			{
+				if (self.is_destroyed)
+					return;
+				self.isCalculating = false;
+				self.copyResultPath();
+				self.hasPath = (self.myPath.length > 0);
+				self.moveNode = 0;
+				self.runtime.trigger(cr.behaviors.Pathfinding.prototype.cnds.OnPathFound, self.inst);
+				self.doDelayFindPath();		// run next pathfind if queued
+			};
+			this.pathFailFn = function ()
+			{
+				if (self.is_destroyed)
+					return;
+				self.isCalculating = false;
+				self.clearResultPath();
+				self.hasPath = false;
+				self.isMoving = false;
+				self.moveNode = 0;
+				self.runtime.trigger(cr.behaviors.Pathfinding.prototype.cnds.OnFailedToFindPath, self.inst);
+				self.doDelayFindPath();		// run next pathfind if queued
+			};
+		}
+	};
+	behinstProto.onDestroy = function ()
+	{
+		this.is_destroyed = true;		// start ignoring callbacks
+		this.delayFindPath = false;
+	};
+	behinstProto.saveToJSON = function ()
+	{
+		var o = {
+			"cs": this.cellSize,
+			"cb": this.cellBorder,
+			"ms": this.maxSpeed,
+			"acc": this.acc,
+			"dec": this.dec,
+			"av": this.av,
+			"re": this.rotateEnabled,
+			"de": this.diagonalsEnabled,
+			"im": this.isMoving,
+			"mfs": this.movingFromStopped,
+			"ftmwm": this.firstTickMovingWhileMoving,
+			"hp": this.hasPath,
+			"mn": this.moveNode,
+			"a": this.a,
+			"lka": this.lastKnownAngle,
+			"s": this.s,
+			"rx": this.rabbitX,
+			"ry": this.rabbitY,
+			"ra": this.rabbitA,
+			"myhc": this.myHcells,
+			"myvc": this.myVcells,
+			"path": this.myPath,
+			"en": this.enabled,
+			"fr": this.firstRun,
+			"obs": [],
+			"costs": []
+		};
+		if (this.isCalculating)
+		{
+			o["dfp"] = true;
+			o["dpx"] = this.calcPathX;
+			o["dpy"] = this.calcPathY;
+		}
+		else
+		{
+			o["dfp"] = this.delayFindPath;
+			o["dpx"] = this.delayPathX;
+			o["dpy"] = this.delayPathY;
+		}
+		var i, len;
+		for (i = 0, len = this.type.obstacleTypes.length; i < len; i++)
+		{
+			o["obs"].push(this.type.obstacleTypes[i].sid);
+		}
+		for (i = 0, len = this.type.costTypes.length; i < len; i++)
+		{
+			o["costs"].push({ "sid": this.type.costTypes[i].obj.sid, "cost": this.type.costTypes[i].cost });
+		}
+		return o;
+	};
+	behinstProto.loadFromJSON = function (o)
+	{
+		this.cellSize = o["cs"];
+		this.cellBorder = o["cb"];
+		this.maxSpeed = o["ms"];
+		this.acc = o["acc"];
+		this.dec = o["dec"];
+		this.av = o["av"];
+		this.rotateEnabled = o["re"];
+		this.diagonalsEnabled = o["de"];
+		this.isMoving = o["im"];
+		this.movingFromStopped = o["mfs"];
+		this.firstTickMovingWhileMoving = o["ftmwm"];
+		this.hasPath = o["hp"];
+		this.moveNode = o["mn"];
+		this.a = o["a"];
+		this.lastKnownAngle = o["lka"];
+		this.s = o["s"];
+		this.rabbitX = o["rx"];
+		this.rabbitY = o["ry"];
+		this.rabbitA = o["ra"];
+		this.myHcells = o["myhc"];
+		this.myVcells = o["myvc"];
+		this.myPath = o["path"];
+		this.enabled = o["en"];
+		this.firstRun = o["fr"];
+		this.delayFindPath = o["dfp"];
+		this.delayPathX = o["dpx"];
+		this.delayPathY = o["dpy"];
+		cr.clearArray(this.type.obstacleTypes);
+		var obsarr = o["obs"];
+		var i, len, t;
+		for (i = 0, len = obsarr.length; i < len; i++)
+		{
+			t = this.runtime.getObjectTypeBySid(obsarr[i]);
+			if (t)
+				this.type.obstacleTypes.push(t);
+		}
+		cr.clearArray(this.type.costTypes);
+		var costarr = o["costs"];
+		for (i = 0, len = costarr.length; i < len; i++)
+		{
+			t = this.runtime.getObjectTypeBySid(costarr[i]["sid"]);
+			if (t)
+				this.type.costTypes.push({ obj: t, cost: costarr[i]["cost"] });
+		}
+		this.getMyInfo().pathfinder["setDiagonals"](this.diagonalsEnabled);
+	};
+	behinstProto.afterLoad = function ()
+	{
+		this.getMyInfo().regenerate = true;
+	};
+	behinstProto.tick = function ()
+	{
+		if (!this.enabled || !this.isMoving)
+			return;
+		if (this.rotateEnabled && this.inst.angle !== this.lastKnownAngle)
+			this.a = this.inst.angle;
+		var dt = this.runtime.getDt(this.inst);
+		var targetAngle, da, dist, nextX, nextY, t, r, curveDist, curMaxSpeed;
+		var inst = this.inst;
+		var rabbitAheadDist = Math.min(this.maxSpeed * 0.4, Math.abs(this.inst.width) * 2);
+		var rabbitSpeed = Math.max(this.s * 1.5, 30);
+		if (this.moveNode < this.myPath.length)
+		{
+			nextX = this.myPath[this.moveNode].x;
+			nextY = this.myPath[this.moveNode].y;
+			dist = cr.distanceTo(this.rabbitX, this.rabbitY, nextX, nextY);
+			if (dist < 3 * rabbitSpeed * dt) // within 3 ticks of movement at the max speed
+			{
+				this.moveNode++;
+				this.rabbitX = nextX;
+				this.rabbitY = nextY;
+				if (this.moveNode < this.myPath.length)
+				{
+					nextX = this.myPath[this.moveNode].x;
+					nextY = this.myPath[this.moveNode].y;
+				}
+			}
+		}
+		else
+		{
+			nextX = this.myPath[this.myPath.length - 1].x;
+			nextY = this.myPath[this.myPath.length - 1].y;
+		}
+		this.rabbitA = cr.angleTo(this.rabbitX, this.rabbitY, nextX, nextY);
+		var distToRabbit = cr.distanceTo(inst.x, inst.y, this.rabbitX, this.rabbitY);
+		if (distToRabbit < rabbitAheadDist && this.moveNode < this.myPath.length)
+		{
+			var moveDist;
+			if (this.firstTickMovingWhileMoving)
+			{
+				moveDist = rabbitAheadDist;
+				this.firstTickMovingWhileMoving = false;
+			}
+			else
+				moveDist = rabbitSpeed * dt;
+			this.rabbitX += Math.cos(this.rabbitA) * moveDist;
+			this.rabbitY += Math.sin(this.rabbitA) * moveDist;
+		}
+		targetAngle = cr.angleTo(inst.x, inst.y, this.rabbitX, this.rabbitY);
+		da = cr.angleDiff(this.a, targetAngle);
+		var distToFinish = cr.distanceTo(inst.x, inst.y, this.myPath[this.myPath.length - 1].x, this.myPath[this.myPath.length - 1].y);
+		var decelDist = (this.maxSpeed * this.maxSpeed) / (2 * this.dec);
+		if (distToRabbit > 1)
+		{
+			this.a = cr.angleRotate(this.a, targetAngle, this.av * dt);
+			if (cr.to_degrees(da) <= 0.5)
+			{
+				curMaxSpeed = this.maxSpeed;
+			}
+			else if (cr.to_degrees(da) >= 120 || (this.movingFromStopped && this.moveNode === 0))
+			{
+				curMaxSpeed = 0;
+				this.movingFromStopped = true;	// we're way off, so make sure it rotates all the way round
+			}
+			else
+			{
+				t = da / this.av;
+				dist = cr.distanceTo(inst.x, inst.y, this.rabbitX, this.rabbitY);
+				r = dist / (2 * Math.sin(da));
+				curveDist = r * da;
+				curMaxSpeed = curveDist / t;
+				if (curMaxSpeed < 0)
+					curMaxSpeed = 0;
+				if (curMaxSpeed > this.maxSpeed)
+					curMaxSpeed = this.maxSpeed;
+			}
+			if (distToFinish < decelDist)
+				curMaxSpeed = Math.min(curMaxSpeed, (distToFinish / decelDist) * this.maxSpeed + (this.maxSpeed / 40));
+			this.s += this.acc * dt;
+			if (this.s > curMaxSpeed)
+				this.s = curMaxSpeed;
+		}
+		/*
+		targetAngle = cr.angleTo(inst.x, inst.y, nextX, nextY);
+		da = cr.angleDiff(this.a, targetAngle);
+		if (this.moveNode === 0)
+		{
+			this.nextMaxSpeed = this.maxSpeed;
+			if (cr.to_degrees(da) <= 0.5)
+			{
+				this.s += this.acc * dt;
+				if (this.s > this.maxSpeed)
+					this.s = this.maxSpeed;
+			}
+			else
+			{
+				this.a = cr.angleRotate(this.a, targetAngle, this.av * dt);
+				this.s = 0;
+			}
+		}
+		else
+		{
+			if (cr.to_degrees(da) <= 0.5)
+				this.nextMaxSpeed = this.maxSpeed;
+			this.s += this.acc * dt;
+			if (this.s > Math.min(this.maxSpeed, this.nextMaxSpeed))
+				this.s = Math.min(this.maxSpeed, this.nextMaxSpeed);
+			this.a = cr.angleRotate(this.a, targetAngle, this.av * dt);
+			if (cr.to_degrees(da) > 50)
+				this.s = 0;
+		}
+		*/
+		inst.x += Math.cos(this.a) * this.s * dt;
+		inst.y += Math.sin(this.a) * this.s * dt;
+		if (this.rotateEnabled)
+		{
+			inst.angle = this.a;
+			this.lastKnownAngle = this.a;
+		}
+		inst.set_bbox_changed();
+		if (this.moveNode === this.myPath.length && cr.distanceTo(inst.x, inst.y, nextX, nextY) < Math.max(3 * this.s * dt, 10))
+		{
+			this.isMoving = false;
+			this.hasPath = false;
+			this.moveNode = 0;
+			this.s = 0;
+			this.runtime.trigger(cr.behaviors.Pathfinding.prototype.cnds.OnArrived, inst);
+			return;
+		}
+	};
+	behinstProto.tick2 = function ()
+	{
+		if (!this.enabled)
+			return;
+		this.generateMap();			// not actually done every tick, just checks for regenerate flag
+		this.doDelayFindPath();
+	};
+	behinstProto.doDelayFindPath = function()
+	{
+		if (this.delayFindPath && !this.is_destroyed)
+		{
+			this.delayFindPath = false;
+			this.doFindPath(this.inst.x, this.inst.y, this.delayPathX, this.delayPathY);
+		}
+	};
+	behinstProto.getMyInfo = function ()
+	{
+		var cellkey = "" + this.cellSize + "," + this.cellBorder;
+		if (!cellData.hasOwnProperty(cellkey))
+		{
+			cellData[cellkey] = {
+				pathfinder: new window["Pathfinder"](),
+				cells: null,
+				regenerate: false,
+				regenerateRegions: []
+			};
+		}
+		return cellData[cellkey];
+	};
+	behinstProto.generateMap = function ()
+	{
+		var myinfo = this.getMyInfo();
+		if (myinfo.pathfinder["isReady"]() && !myinfo.regenerate && !myinfo.regenerateRegions.length)
+			return;		// already got a map and not marked to regenerate
+		var arr, x, y, lenx, leny, i, len, r, cx1, cy1, cx2, cy2, q;
+		if (!myinfo.pathfinder["isReady"]() || myinfo.regenerate)
+		{
+			this.myHcells = Math.ceil(this.runtime.running_layout.width / this.cellSize);
+			this.myVcells = Math.ceil(this.runtime.running_layout.height / this.cellSize);
+			arr = [];
+			arr.length = this.myHcells;
+			lenx = this.myHcells;
+			leny = this.myVcells;
+			for (x = 0; x < lenx; ++x)
+			{
+				arr[x] = [];
+				arr[x].length = leny;
+				for (y = 0; y < leny; ++y)
+					arr[x][y] = this.queryCellCollision(x, y);
+			}
+			myinfo.cells = arr;
+			myinfo.pathfinder["init"](this.myHcells, this.myVcells, arr, this.diagonalsEnabled);
+			myinfo.regenerate = false;
+			cr.clearArray(myinfo.regenerateRegions);
+		}
+		else if (myinfo.regenerateRegions.length)
+		{
+			for (i = 0, len = myinfo.regenerateRegions.length; i < len; ++i)
+			{
+				r = myinfo.regenerateRegions[i];
+				cx1 = r[0];
+				cy1 = r[1];
+				cx2 = r[2];
+				cy2 = r[3];
+				arr = [];
+				lenx = cx2 - cx1;
+				leny = cy2 - cy1;
+				arr.length = lenx;
+				for (x = 0; x < lenx; ++x)
+				{
+					arr[x] = [];
+					arr[x].length = leny;
+					for (y = 0; y < leny; ++y)
+					{
+						q = this.queryCellCollision(cx1 + x, cy1 + y);
+						arr[x][y] = q;
+						myinfo.cells[cx1 + x][cy1 + y] = q;
+					}
+				}
+				myinfo.pathfinder["updateRegion"](cx1, cy1, lenx, leny, arr);
+			}
+			cr.clearArray(myinfo.regenerateRegions);
+		}
+	};
+	behinstProto.clearResultPath = function ()
+	{
+		var i, len;
+		for (i = 0, len = this.myPath.length; i < len; i++)
+			window["freeResultNode"](this.myPath[i]);
+		cr.clearArray(this.myPath);
+	};
+	behinstProto.copyResultPath = function ()
+	{
+		var pathfinder = this.getMyInfo().pathfinder;
+		var pathList = pathfinder["pathList"];
+		this.clearResultPath();
+		var i, len, n, m;
+		for (i = 0, len = pathList.length; i < len; i++)
+		{
+			n = pathList[i];
+			m = window["allocResultNode"]();
+			m.x = (n.x + 0.5) * this.cellSize;
+			m.y = (n.y + 0.5) * this.cellSize;
+			this.myPath.push(m);
+		}
+	};
+	var candidates = [];
+	var tmpRect = new cr.rect();
+	behinstProto.queryCellCollision = function (x_, y_)
+	{
+		var i, len, t, j, lenj, cost, ret = 0;
+		tmpRect.left = x_ * this.cellSize - this.cellBorder;
+		tmpRect.top = y_ * this.cellSize - this.cellBorder;
+		tmpRect.right = (x_ + 1) * this.cellSize + this.cellBorder;
+		tmpRect.bottom = (y_ + 1) * this.cellSize + this.cellBorder;
+		if (this.obstacles === 0)	// solids
+		{
+			if (this.runtime.testRectOverlapSolid(tmpRect))
+				return window["PF_OBSTACLE"];
+		}
+		else
+		{
+			this.runtime.getTypesCollisionCandidates(this.inst.layer, this.type.obstacleTypes, tmpRect, candidates);
+			for (i = 0, len = candidates.length; i < len; ++i)
+			{
+				if (this.runtime.testRectOverlap(tmpRect, candidates[i]))
+				{
+					cr.clearArray(candidates);
+					return window["PF_OBSTACLE"];
+				}
+			}
+			candidates.length = 0;
+		}
+		for (i = 0, len = this.type.costTypes.length; i < len; i++)
+		{
+			t = this.type.costTypes[i].obj;
+			cost = this.type.costTypes[i].cost;
+			this.runtime.getCollisionCandidates(this.inst.layer, t, tmpRect, candidates);
+			for (j = 0, lenj = candidates.length; j < lenj; ++j)
+			{
+				if (this.runtime.testRectOverlap(tmpRect, candidates[j]))
+					ret += cost;
+			}
+			cr.clearArray(candidates);
+		}
+		return ret;
+	};
+	behinstProto.doFindPath = function (startX, startY, endX, endY)
+	{
+		var pathfinder = this.getMyInfo().pathfinder;
+		if (!pathfinder["isReady"]())
+			return false;		// not yet ready
+		this.isCalculating = true;
+		this.calcPathX = endX;
+		this.calcPathY = endY;
+		var cellX = Math.floor(startX / this.cellSize);
+		var cellY = Math.floor(startY / this.cellSize);
+		var destCellX = Math.floor(endX / this.cellSize);
+		var destCellY = Math.floor(endY / this.cellSize);
+		var bestDist, bestX, bestY, x, y, dx, dy, curDist;
+		if (pathfinder["at"](destCellX, destCellY) === window["PF_OBSTACLE"])
+		{
+			bestDist = 1000000;
+			bestX = 0;
+			bestY = 0;
+			for (x = 0; x < this.myHcells; x++)
+			{
+				for (y = 0; y < this.myVcells; y++)
+				{
+					if (pathfinder["at"](x, y) !== window["PF_OBSTACLE"])
+					{
+						dx = destCellX - x;
+						dy = destCellY - y;
+						curDist = dx*dx + dy*dy;
+						if (curDist < bestDist)
+						{
+							bestDist = curDist;
+							bestX = x;
+							bestY = y;
+						}
+					}
+				}
+			}
+			destCellX = bestX;
+			destCellY = bestY;
+		}
+		var self = this;
+		pathfinder["findPath"](cellX, cellY, destCellX, destCellY, this.pathSuccessFn, this.pathFailFn);
+	};
+	function Cnds() {};
+	Cnds.prototype.OnPathFound = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnFailedToFindPath = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.IsCellObstacle = function (x_, y_)
+	{
+		return (this.getMyInfo().pathfinder["at"](x_, y_) === window["PF_OBSTACLE"]);
+	};
+	Cnds.prototype.IsCalculatingPath = function ()
+	{
+		return this.isCalculating;
+	};
+	Cnds.prototype.IsMoving = function ()
+	{
+		return this.isMoving;
+	};
+	Cnds.prototype.OnArrived = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.CompareSpeed = function (cmp, x)
+	{
+		return cr.do_cmp(this.isMoving ? this.s : 0, cmp, x);
+	};
+	Cnds.prototype.DiagonalsEnabled = function (cmp, x)
+	{
+		return this.diagonalsEnabled;
+	};
+	behaviorProto.cnds = new Cnds();
+	function Acts() {};
+	Acts.prototype.FindPath = function (x_, y_)
+	{
+		if (!this.enabled)
+			return;
+		if (this.isCalculating || !this.getMyInfo().pathfinder["isReady"]())
+		{
+			this.delayFindPath = true;
+			this.delayPathX = x_;
+			this.delayPathY = y_;
+		}
+		else
+			this.doFindPath(this.inst.x, this.inst.y, x_, y_);
+	};
+	Acts.prototype.StartMoving = function ()
+	{
+		if (this.hasPath)
+		{
+			if (this.isMoving)
+				this.firstTickMovingWhileMoving = true;
+			this.movingFromStopped = !this.isMoving;
+			this.isMoving = true;
+			this.rabbitX = this.inst.x;
+			this.rabbitY = this.inst.y;
+			this.rabbitA = this.inst.angle;
+		}
+	};
+	Acts.prototype.Stop = function ()
+	{
+		this.isMoving = false;
+	};
+	Acts.prototype.SetEnabled = function (e)
+	{
+		this.enabled = (e !== 0);
+	};
+	Acts.prototype.RegenerateMap = function ()
+	{
+		this.getMyInfo().regenerate = true;
+	};
+	Acts.prototype.AddObstacle = function (obj_)
+	{
+		var obstacleTypes = this.type.obstacleTypes;
+		if (obstacleTypes.indexOf(obj_) !== -1)
+			return;
+		var i, len, t;
+		for (i = 0, len = obstacleTypes.length; i < len; i++)
+		{
+			t = obstacleTypes[i];
+			if (t.is_family && t.members.indexOf(obj_) !== -1)
+				return;
+		}
+		obstacleTypes.push(obj_);
+	};
+	Acts.prototype.ClearObstacles = function ()
+	{
+		cr.clearArray(this.type.obstacleTypes);
+	};
+	Acts.prototype.AddCost = function (obj_, cost_)
+	{
+		var costTypes = this.type.costTypes;
+		var i, len, t;
+		for (i = 0, len = costTypes.length; i < len; i++)
+		{
+			t = costTypes[i].obj;
+			if (t === obj_)
+				return;			// already added this one
+			if (t.is_family && t.members.indexOf(obj_) !== -1)
+				return;			// already added via family
+		}
+		costTypes.push({ obj: obj_, cost: cost_ });
+	};
+	Acts.prototype.ClearCost = function ()
+	{
+		cr.clearArray(this.type.costTypes);
+	};
+	Acts.prototype.SetMaxSpeed = function (x_)
+	{
+		this.maxSpeed = x_;
+	};
+	Acts.prototype.SetSpeed = function (x_)
+	{
+		if (x_ < 0)
+			x_ = 0;
+		if (x_ > this.maxSpeed)
+			x_ = this.maxSpeed;
+		this.s = x_;
+	};
+	Acts.prototype.SetAcc = function (x_)
+	{
+		this.acc = x_;
+	};
+	Acts.prototype.SetDec = function (x_)
+	{
+		this.dec = x_;
+	};
+	Acts.prototype.SetRotateSpeed = function (x_)
+	{
+		this.av = cr.to_radians(x_);
+	};
+	Acts.prototype.SetDiagonalsEnabled = function (e)
+	{
+		this.diagonalsEnabled = (e !== 0);
+		this.getMyInfo().pathfinder["setDiagonals"](this.diagonalsEnabled);
+	};
+	Acts.prototype.RegenerateRegion = function (startx, starty, endx, endy)
+	{
+		this.doRegenerateRegion(startx, starty, endx, endy);
+	};
+	Acts.prototype.RegenerateObjectRegion = function (obj)
+	{
+		if (!obj)
+			return;
+		var instances = obj.getCurrentSol().getObjects();
+		var i, len, inst;
+		for (i = 0, len = instances.length; i < len; ++i)
+		{
+			inst = instances[i];
+			if (!inst.update_bbox)
+				continue;
+			inst.update_bbox();
+			this.doRegenerateRegion(inst.bbox.left, inst.bbox.top, inst.bbox.right, inst.bbox.bottom);
+		}
+	};
+	behinstProto.doRegenerateRegion = function (startx, starty, endx, endy)
+	{
+		var x1 = Math.min(startx, endx) - this.cellBorder;
+		var y1 = Math.min(starty, endy) - this.cellBorder;
+		var x2 = Math.max(startx, endx) + this.cellBorder;
+		var y2 = Math.max(starty, endy) + this.cellBorder;
+		var cellX1 = Math.max(Math.floor(x1 / this.cellSize), 0);
+		var cellY1 = Math.max(Math.floor(y1 / this.cellSize), 0);
+		var cellX2 = Math.min(Math.ceil(x2 / this.cellSize), this.myHcells);
+		var cellY2 = Math.min(Math.ceil(y2 / this.cellSize), this.myVcells);
+		if (cellX1 >= cellX2 || cellY1 >= cellY2)
+			return;		// empty area to regenerate
+		this.getMyInfo().regenerateRegions.push([cellX1, cellY1, cellX2, cellY2]);
+	};
+	behaviorProto.acts = new Acts();
+	function Exps() {};
+	Exps.prototype.NodeCount = function (ret)
+	{
+		ret.set_int(this.myPath.length);
+	};
+	Exps.prototype.NodeXAt = function (ret, i)
+	{
+		i = Math.floor(i);
+		if (i < 0 || i >= this.myPath.length)
+			ret.set_float(0);
+		else
+			ret.set_float(this.myPath[i].x);
+	};
+	Exps.prototype.NodeYAt = function (ret, i)
+	{
+		i = Math.floor(i);
+		if (i < 0 || i >= this.myPath.length)
+			ret.set_float(0);
+		else
+			ret.set_float(this.myPath[i].y);
+	};
+	Exps.prototype.CellSize = function (ret)
+	{
+		ret.set_int(this.cellSize);
+	};
+	Exps.prototype.RabbitX = function (ret)
+	{
+		ret.set_float(this.rabbitX);
+	};
+	Exps.prototype.RabbitY = function (ret)
+	{
+		ret.set_float(this.rabbitY);
+	};
+	Exps.prototype.MaxSpeed = function (ret)
+	{
+		ret.set_float(this.maxSpeed);
+	};
+	Exps.prototype.Acceleration = function (ret)
+	{
+		ret.set_float(this.acc);
+	};
+	Exps.prototype.Deceleration = function (ret)
+	{
+		ret.set_float(this.dec);
+	};
+	Exps.prototype.RotateSpeed = function (ret)
+	{
+		ret.set_float(cr.to_degrees(this.av));
+	};
+	Exps.prototype.MovingAngle = function (ret)
+	{
+		ret.set_float(cr.to_degrees(this.a));
+	};
+	Exps.prototype.CurrentNode = function (ret)
+	{
+		ret.set_int(this.moveNode);
+	};
+	Exps.prototype.Speed = function (ret)
+	{
+		ret.set_float(this.isMoving ? this.s : 0);
+	};
+	behaviorProto.exps = new Exps();
+}());
+;
+;
 cr.behaviors.Timer = function(runtime)
 {
 	this.runtime = runtime;
@@ -20804,422 +24018,15 @@ cr.behaviors.Timer = function(runtime)
 	};
 	behaviorProto.exps = new Exps();
 }());
-var easeOutBounceArray = [];
-var easeInElasticArray = [];
-var easeOutElasticArray = [];
-var easeInOutElasticArray = [];
-var easeInCircle = [];
-var easeOutCircle = [];
-var easeInOutCircle = [];
-var easeInBack = [];
-var easeOutBack = [];
-var easeInOutBack = [];
-var litetween_precision = 10000;
-var updateLimit = 0; //0.0165;
-function easeOutBouncefunc(t) {
-  var b=0.0;
-  var c=1.0;
-  var d=1.0;
-	if ((t/=d) < (1/2.75)) {
-		result = c*(7.5625*t*t) + b;
-	} else if (t < (2/2.75)) {
-		result = c*(7.5625*(t-=(1.5/2.75))*t + .75) + b;
-	} else if (t < (2.5/2.75)) {
-		result = c*(7.5625*(t-=(2.25/2.75))*t + .9375) + b;
-	} else {
-		result = c*(7.5625*(t-=(2.625/2.75))*t + .984375) + b;
-	}
-  return result;
-}
-function integerize(t, d)
-{
-  return Math.round(t/d*litetween_precision);
-}
-function easeFunc(easing, t, b, c, d, flip, param)
-{
-  var ret_ease = 0;
-  switch (easing) {
-	case 0:		// linear
-		ret_ease = c*t/d + b;
-    break;
-	case 1:		// easeInQuad
-		ret_ease = c*(t/=d)*t + b;
-    break;
-	case 2:		// easeOutQuad
-		ret_ease = -c *(t/=d)*(t-2) + b;
-    break;
-	case 3:		// easeInOutQuad
-		if ((t/=d/2) < 1)
-      ret_ease = c/2*t*t + b
-    else
-		  ret_ease = -c/2 * ((--t)*(t-2) - 1) + b;
-    break;
-	case 4:		// easeInCubic
-		ret_ease = c*(t/=d)*t*t + b;
-    break;
-	case 5:		// easeOutCubic
-		ret_ease = c*((t=t/d-1)*t*t + 1) + b;
-    break;
-	case 6:		// easeInOutCubic
-		if ((t/=d/2) < 1)
-			ret_ease = c/2*t*t*t + b
-    else
-		  ret_ease = c/2*((t-=2)*t*t + 2) + b;
-    break;
-	case 7:		// easeInQuart
-		ret_ease = c*(t/=d)*t*t*t + b;
-    break;
-	case 8:		// easeOutQuart
-		ret_ease = -c * ((t=t/d-1)*t*t*t - 1) + b;
-    break;
-	case 9:		// easeInOutQuart
-		if ((t/=d/2) < 1)
-      ret_ease = c/2*t*t*t*t + b
-    else
-		  ret_ease = -c/2 * ((t-=2)*t*t*t - 2) + b;
-    break;
-	case 10:		// easeInQuint
-		ret_ease = c*(t/=d)*t*t*t*t + b;
-    break;
-	case 11:		// easeOutQuint
-		ret_ease = c*((t=t/d-1)*t*t*t*t + 1) + b;
-    break;
-	case 12:		// easeInOutQuint
-		if ((t/=d/2) < 1)
-      ret_ease = c/2*t*t*t*t*t + b
-    else
-		  ret_ease = c/2*((t-=2)*t*t*t*t + 2) + b;
-    break;
-	case 13:		// easeInCircle
-    if (param.optimized) {
-		  ret_ease = easeInCircle[integerize(t,d)];
-    } else {
-      ret_ease = -(Math.sqrt(1-t*t) - 1);
-    }
-    break;
-	case 14:		// easeOutCircle
-    if (param.optimized) {
-  		ret_ease = easeOutCircle[integerize(t,d)];
-    } else {
-      ret_ease = Math.sqrt(1 - ((t-1)*(t-1)));
-    }
-    break;
-	case 15:		// easeInOutCircle
-    if (param.optimized) {
-  		ret_ease = easeInOutCircle[integerize(t,d)];
-    } else {
-  		if ((t/=d/2) < 1) ret_ease = -c/2 * (Math.sqrt(1 - t*t) - 1) + b
-      else ret_ease = c/2 * (Math.sqrt(1 - (t-=2)*t) + 1) + b;
-    }
-    break;
-	case 16:		// easeInBack
-    if (param.optimized) {
-		  ret_ease = easeInBack[integerize(t,d)];
-    } else {
-  		var s = param.s;
-	  	ret_ease = c*(t/=d)*t*((s+1)*t - s) + b;
-    }
-    break;
-	case 17:		// easeOutBack
-    if (param.optimized) {
-		  ret_ease = easeOutBack[integerize(t,d)];
-    } else {
-   		var s = param.s;
-	  	ret_ease = c*((t=t/d-1)*t*((s+1)*t + s) + 1) + b;
-    }
-    break;
-	case 18:		// easeInOutBack
-    if (param.optimized) {
-		  ret_ease = easeInOutBack[integerize(t,d)];
-    } else {
-      var s = param.s
-  		if ((t/=d/2) < 1)
-        ret_ease = c/2*(t*t*(((s*=(1.525))+1)*t - s)) + b
-      else
-  		  ret_ease = c/2*((t-=2)*t*(((s*=(1.525))+1)*t + s) + 2) + b;
-    }
-    break;
-	case 19:	//easeInElastic
-    if (param.optimized) {
-  		ret_ease = easeInElasticArray[integerize(t, d)];
-    } else {
-      var a = param.a;
-      var p = param.p;
-      var s = 0;
-      if (t==0) ret_ease = b; if ((t/=d)==1) ret_ease = b+c;
-      if (p==0) p=d*.3;	if (a==0 || a < Math.abs(c)) { a=c; s=p/4; }
-      else var s = p/(2*Math.PI) * Math.asin (c/a);
-  		ret_ease = -(a*Math.pow(2,10*(t-=1)) * Math.sin( (t*d-s)*(2*Math.PI)/p )) + b;
-    }
-    break;
-	case 20:	//easeOutElastic
-    if (param.optimized) {
-      ret_ease = easeOutElasticArray[integerize(t,d)];
-    } else {
-      var a = param.a;
-      var p = param.p;
-      var s = 0;
-  		if (t==0) ret_ease= b;  if ((t/=d)==1) ret_ease= b+c;  if (p == 0) p=d*.3;
-  		if (a==0 || a < Math.abs(c)) { a=c; var s=p/4; }
-  		else var s = p/(2*Math.PI) * Math.asin (c/a);
-  		ret_ease= (a*Math.pow(2,-10*t) * Math.sin( (t*d-s)*(2*Math.PI)/p ) + c + b);
-    }
-    break;
-	case 21:	//easeInOutElastic
-    if (param.optimized) {
-      ret_ease = easeInOutElasticArray[integerize(t,d)];
-    } else {
-      var a = param.a;
-      var p = param.p;
-      var s = 0;
-  		if (t==0) ret_ease = b;
-  		if ((t/=d/2)==2) ret_ease = b+c;
-  		if (p==0) p=d*(.3*1.5);
-  		if (a==0 || a < Math.abs(c)) { a=c; var s=p/4; }
-  		else var s = p/(2*Math.PI) * Math.asin (c/a);
-  		if (t < 1)
-        ret_ease = -.5*(a*Math.pow(2,10*(t-=1)) * Math.sin( (t*d-s)*(2*Math.PI)/p )) + b
-      else
-  		  ret_ease = a*Math.pow(2,-10*(t-=1)) * Math.sin( (t*d-s)*(2*Math.PI)/p )*.5 + c + b;
-    }
-    break;
-	case 22:	//easeInBounce
-    if (param.optimized) {
-  		ret_ease = c - easeOutBounceArray[integerize(d-t, d)] + b;
-    } else {
-  		ret_ease = c - easeOutBouncefunc(d-t/d) + b;
-    }
-    break;
-	case 23:	//easeOutBounce
-    if (param.optimized) {
-  		ret_ease = easeOutBounceArray[integerize(t, d)];
-    } else {
-  		ret_ease = easeOutBouncefunc(t/d);
-    }
-    break;
-	case 24:	//easeInOutBounce
-    if (param.optimized) {
-  		if (t < d/2)
-        ret_ease = (c - easeOutBounceArray[integerize(d-(t*2), d)] + b) * 0.5 +b;
-  		else
-        ret_ease = easeOutBounceArray[integerize(t*2-d, d)] * .5 + c*.5 + b;
-    } else {
-  		if (t < d/2)
-        ret_ease = (c - easeOutBouncefunc(d-(t*2)) + b) * 0.5 +b;
-  		else
-        ret_ease = easeOutBouncefunc((t*2-d)/d) * .5 + c *.5 + b;
-    }
-    break;
-	case 25:	//easeInSmoothstep
-		var mt = (t/d) / 2;
-		ret_ease = (2*(mt * mt * (3 - 2*mt)));
-    break;
-	case 26:	//easeOutSmoothstep
-		var mt = ((t/d) + 1) / 2;
-		ret_ease = ((2*(mt * mt * (3 - 2*mt))) - 1);
-    break;
-	case 27:	//easeInOutSmoothstep
-		var mt = (t / d);
-		ret_ease = (mt * mt * (3 - 2*mt));
-    break;
-	};
-  if (flip)
-    return (c - b) - ret_ease
-  else
-    return ret_ease;
-};
-(function preCalculateArray() {
-  var d = 1.0;
-  var b = 0.0;
-  var c = 1.0;
-  var result = 0.0;
-  var a = 0.0;
-  var p = 0.0;
-  var t = 0.0;
-  var s = 0.0;
-  for (var ti = 0; ti <= litetween_precision; ti++) {
-    t = ti/litetween_precision;
-  	if ((t/=d) < (1/2.75)) {
-  		result = c*(7.5625*t*t) + b;
-  	} else if (t < (2/2.75)) {
-  		result = c*(7.5625*(t-=(1.5/2.75))*t + .75) + b;
-  	} else if (t < (2.5/2.75)) {
-  		result = c*(7.5625*(t-=(2.25/2.75))*t + .9375) + b;
-  	} else {
-  		result = c*(7.5625*(t-=(2.625/2.75))*t + .984375) + b;
-  	}
-    easeOutBounceArray[ti] = result;
-    t = ti/litetween_precision; a = 0; p = 0;
-    if (t==0) result = b; if ((t/=d)==1) result = b+c;
-    if (p==0) p=d*.3;	if (a==0 || a < Math.abs(c)) { a=c; var s=p/4; }
-    else var s = p/(2*Math.PI) * Math.asin (c/a);
-		result = -(a*Math.pow(2,10*(t-=1)) * Math.sin( (t*d-s)*(2*Math.PI)/p )) + b;
-    easeInElasticArray[ti] = result;
-    t = ti/litetween_precision; a = 0; p = 0;
-		if (t==0) result= b;  if ((t/=d)==1) result= b+c;  if (p == 0) p=d*.3;
-		if (a==0 || a < Math.abs(c)) { a=c; var s=p/4; }
-		else var s = p/(2*Math.PI) * Math.asin (c/a);
-		result= (a*Math.pow(2,-10*t) * Math.sin( (t*d-s)*(2*Math.PI)/p ) + c + b);
-    easeOutElasticArray[ti] = result;
-    t = ti/litetween_precision; a = 0; p = 0;
-		if (t==0) result = b;
-		if ((t/=d/2)==2) result = b+c;
-		if (p==0) p=d*(.3*1.5);
-		if (a==0 || a < Math.abs(c)) { a=c; var s=p/4; }
-		else var s = p/(2*Math.PI) * Math.asin (c/a);
-		if (t < 1)
-      result = -.5*(a*Math.pow(2,10*(t-=1)) * Math.sin( (t*d-s)*(2*Math.PI)/p )) + b
-    else
-		  result = a*Math.pow(2,-10*(t-=1)) * Math.sin( (t*d-s)*(2*Math.PI)/p )*.5 + c + b;
-    easeInOutElasticArray[ti] = result;
-    t = ti/litetween_precision; easeInCircle[ti] = -(Math.sqrt(1-t*t) - 1);
-    t = ti/litetween_precision; easeOutCircle[ti] = Math.sqrt(1 - ((t-1)*(t-1)));
-    t = ti/litetween_precision;
-		if ((t/=d/2) < 1) result = -c/2 * (Math.sqrt(1 - t*t) - 1) + b
-    else result = c/2 * (Math.sqrt(1 - (t-=2)*t) + 1) + b;
-    easeInOutCircle[ti] = result;
-    t = ti/litetween_precision; s = 0;
-		if (s==0) s = 1.70158;
-		result = c*(t/=d)*t*((s+1)*t - s) + b;
-    easeInBack[ti] = result;
-    t = ti/litetween_precision; s = 0;
-		if (s==0) s = 1.70158;
-		result = c*((t=t/d-1)*t*((s+1)*t + s) + 1) + b;
-    easeOutBack[ti] = result;
-    t = ti/litetween_precision; s = 0; if (s==0) s = 1.70158;
-		if ((t/=d/2) < 1)
-      result = c/2*(t*t*(((s*=(1.525))+1)*t - s)) + b
-    else
-		  result = c/2*((t-=2)*t*(((s*=(1.525))+1)*t + s) + 2) + b;
-    easeInOutBack[ti] = result;
-	}
-}());
-var TweenObject = function()
-{
-	var constructor = function (tname, tweened, easefunc, initial, target, duration, enforce)
-	{
-    this.name = tname;
-    this.value = 0;
-    this.setInitial(initial);
-    this.setTarget(target);
-    this.easefunc = easefunc;
-    this.tweened = tweened;
-    this.duration = duration;
-    this.progress = 0;
-    this.state = 0;
-    this.onStart = false;
-    this.onEnd = false;
-    this.onReverseStart = false;
-    this.onReverseEnd = false;
-    this.lastKnownValue = 0;
-    this.lastKnownValue2 = 0;
-    this.enforce = enforce;
-    this.pingpong = 1.0;
-    this.flipEase = false;
-    this.easingparam = [];
-    this.lastState = 1;
-    for (var i=0; i<28; i++) {
-      this.easingparam[i] = {};
-      this.easingparam[i].a = 0.0;
-      this.easingparam[i].p = 0.0;
-      this.easingparam[i].t = 0.0;
-      this.easingparam[i].s = 0.0;
-      this.easingparam[i].optimized = true;
-    }
-	}
-	return constructor;
-}();
-(function () {
-	TweenObject.prototype = {
-	};
-  TweenObject.prototype.flipTarget = function ()
-  {
-    var x1 = this.initialparam1;
-    var x2 = this.initialparam2;
-    this.initialparam1 = this.targetparam1;
-    this.initialparam2 = this.targetparam2;
-    this.targetparam1 = x1;
-    this.targetparam2 = x2;
-    this.lastKnownValue = 0;
-    this.lastKnownValue2 = 0;
-  }
-  TweenObject.prototype.setInitial = function (initial)
-  {
-    this.initialparam1 = parseFloat(initial.split(",")[0]);
-    this.initialparam2 = parseFloat(initial.split(",")[1]);
-		this.lastKnownValue = 0;
-		this.lastKnownValue2 = 0;
-  }
-  TweenObject.prototype.setTarget = function (target)
-  {
-    this.targetparam1 = parseFloat(target.split(",")[0]);
-    this.targetparam2 = parseFloat(target.split(",")[1]);
-    if (isNaN(this.targetparam2)) this.targetparam2 = this.targetparam1;
-  }
-  TweenObject.prototype.OnTick = function(dt)
-  {
-    if (this.state === 0) return -1.0;
-    if (this.state === 1)
-      this.progress += dt;
-    if (this.state === 2)
-      this.progress -= dt;
-    if (this.state === 3) {
-      this.state = 0;
-    }
-    if ((this.state === 4) || (this.state === 6)) {
-      this.progress += dt * this.pingpong;
-    }
-    if (this.state === 5) {
-      this.progress += dt * this.pingpong;
-    }
-    if (this.progress < 0) {
-      this.progress = 0;
-      if (this.state === 4) {
-        this.pingpong = 1;
-      } else if (this.state === 6) {
-        this.pingpong = 1;
-        this.flipEase = false;
-      } else {
-        this.state = 0;
-      }
-      this.onReverseEnd = true;
-      return 0.0;
-    } else if (this.progress > this.duration) {
-      this.progress = this.duration;
-      if (this.state === 4) {
-        this.pingpong = -1;
-      } else if (this.state === 6) {
-        this.pingpong = -1;
-        this.flipEase = true;
-      } else if (this.state === 5) {
-        this.progress = 0.0;
-      } else {
-        this.state = 0;
-      }
-      this.onEnd = true;
-      return 1.0;
-    } else {
-      if (this.flipEase) {
-        var factor = easeFunc(this.easefunc, this.duration - this.progress, 0, 1, this.duration, this.flipEase, this.easingparam[this.easefunc]);
-      } else {
-        var factor = easeFunc(this.easefunc, this.progress, 0, 1, this.duration, this.flipEase, this.easingparam[this.easefunc]);
-      }
-      return factor;
-    }
-  };
-}());
 ;
 ;
-function trim (str) {
-    return str.replace(/^\s\s*/, '').replace(/\s\s*$/, '');
-}
-cr.behaviors.lunarray_LiteTween = function(runtime)
+cr.behaviors.custom = function(runtime)
 {
 	this.runtime = runtime;
 };
 (function ()
 {
-	var behaviorProto = cr.behaviors.lunarray_LiteTween.prototype;
+	var behaviorProto = cr.behaviors.custom.prototype;
 	behaviorProto.Type = function(behavior, objtype)
 	{
 		this.behavior = behavior;
@@ -21234,560 +24041,304 @@ cr.behaviors.lunarray_LiteTween = function(runtime)
 	{
 		this.type = type;
 		this.behavior = type.behavior;
-		this.inst = inst;				// associated object instance to modify
+		this.inst = inst;
 		this.runtime = type.runtime;
-		this.i = 0;		// progress
+		this.dx = 0;
+		this.dy = 0;
+		this.cancelStep = 0;
 	};
 	var behinstProto = behaviorProto.Instance.prototype;
 	behinstProto.onCreate = function()
 	{
-    this.playmode = this.properties[0];
-    this.active = (this.playmode == 1) || (this.playmode == 2) || (this.playmode == 3) || (this.playmode == 4);
-		this.tweened = this.properties[1]; // 0=Position|1=Size|2=Width|3=Height|4=Angle|5=Opacity|6=Value only|7=Horizontal|8=Vertical|9=Scale
-		this.easing = this.properties[2];
-		this.target = this.properties[3];
-		this.targetmode = this.properties[4];
-    this.useCurrent = false;
-    if (this.targetmode === 1) this.target = "relative("+this.target+")";
-		this.duration = this.properties[5];
-		this.enforce = (this.properties[6] === 1);
-    this.value = 0;
-    this.tween_list = {};
-    this.addToTweenList("default", this.tweened, this.easing, "current", this.target, this.duration, this.enforce);
-    if (this.properties[0] === 1) this.startTween(0)
-    if (this.properties[0] === 2) this.startTween(2)
-    if (this.properties[0] === 3) this.startTween(3)
-    if (this.properties[0] === 4) this.startTween(4)
+		this.stepMode = this.properties[0];	// 0=None, 1=Linear, 2=Horizontal then vertical, 3=Vertical then horizontal
+		this.pxPerStep = this.properties[1];
+		this.enabled = (this.properties[2] !== 0);
 	};
-	behinstProto.parseCurrent = function(tweened, parseText)
-  {
-    if (parseText === undefined) parseText = "current";
-    var parsed = trim(parseText);
-    parseText = trim(parseText);
-    var value = this.value;
-    if (parseText === "current") {
-      switch (tweened) {
-        case 0: parsed = this.inst.x + "," + this.inst.y; break;
-        case 1: parsed = this.inst.width + "," + this.inst.height; break;
-        case 2: parsed = this.inst.width + "," + this.inst.height; break;
-        case 3: parsed = this.inst.width + "," + this.inst.height; break;
-        case 4: parsed = cr.to_degrees(this.inst.angle) + "," + cr.to_degrees(this.inst.angle); break;
-        case 5: parsed = (this.inst.opacity*100) + "," + (this.inst.opacity*100); break;
-        case 6: parsed = value + "," + value; break;
-        case 7: parsed = this.inst.x + "," + this.inst.y; break;
-        case 8: parsed = this.inst.x + "," + this.inst.y; break;
-        case 9:
-          if (this.inst.curFrame !== undefined)
-            parsed = (this.inst.width/this.inst.curFrame.width) + "," +(this.inst.height/this.inst.curFrame.height)
-          else
-            parsed = "1,1";
-          break;
-        default:  break;
-      }
-    }
-    if (parseText.substring(0,8) === "relative") {
-      var param1 = parseText.match(/\((.*?)\)/);
-      if (param1) {
-        var relativex = parseFloat(param1[1].split(",")[0]);
-        var relativey = parseFloat(param1[1].split(",")[1]);
-      }
-      if (isNaN(relativex)) relativex = 0;
-      if (isNaN(relativey)) relativey = 0;
-      switch (tweened) {
-        case 0: parsed = (this.inst.x+relativex) + "," + (this.inst.y+relativey); break;
-        case 1: parsed = (this.inst.width+relativex) + "," + (this.inst.height+relativey); break;
-        case 2: parsed = (this.inst.width+relativex) + "," + (this.inst.height+relativey); break;
-        case 3: parsed = (this.inst.width+relativex) + "," + (this.inst.height+relativey); break;
-        case 4: parsed = (cr.to_degrees(this.inst.angle)+relativex) + "," + (cr.to_degrees(this.inst.angle)+relativey); break;
-        case 5: parsed = (this.inst.opacity*100+relativex) + "," + (this.inst.opacity*100+relativey); break;
-        case 6: parsed = value+relativex + "," + value+relativex; break;
-        case 7: parsed = (this.inst.x+relativex) + "," + (this.inst.y); break;
-        case 8: parsed = (this.inst.x) + "," + (this.inst.y+relativex); break;
-        case 9: parsed = (relativex) + "," + (relativey); break;
-        default:  break;
-      }
-    }
-    return parsed;
-  };
-	behinstProto.addToTweenList = function(tname, tweened, easing, init, targ, duration, enforce)
-  {
-    init = this.parseCurrent(tweened, init);
-    targ = this.parseCurrent(tweened, targ);
-    if (this.tween_list[tname] !== undefined) {
-      delete this.tween_list[tname]
-    }
-    this.tween_list[tname] = new TweenObject(tname, tweened, easing, init, targ, duration, enforce);
-    this.tween_list[tname].dt = 0;
-  };
 	behinstProto.saveToJSON = function ()
 	{
-    var v = JSON.stringify(this.tween_list["default"]);
 		return {
-			"playmode": this.playmode,
-			"active": this.active,
-			"tweened": this.tweened,
-			"easing": this.easing,
-			"target": this.target,
-			"targetmode": this.targetmode,
-			"useCurrent": this.useCurrent,
-			"duration": this.duration,
-			"enforce": this.enforce,
-			"value": this.value,
-			"tweenlist": JSON.stringify(this.tween_list["default"])
+			"dx": this.dx,
+			"dy": this.dy,
+			"cancelStep": this.cancelStep,
+			"enabled": this.enabled,
+			"stepMode": this.stepMode,
+			"pxPerStep": this.pxPerStep
 		};
 	};
-  TweenObject.Load = function(rawObj, tname, tweened, easing, init, targ, duration, enforce)
-  {
-    var obj = new TweenObject(tname, tweened, easing, init, targ, duration, enforce);
-    for(var i in rawObj)
-        obj[i] = rawObj[i];
-    return obj;
-  };
 	behinstProto.loadFromJSON = function (o)
 	{
-    var x = JSON.parse(o["tweenlist"]);
-    var tempObj = TweenObject.Load(x, x.name, x.tweened, x.easefunc, x.initialparam1+","+x.initialparam2, x.targetparam1+","+x.targetparam2, x.duration, x.enforce);
-		this.tween_list["default"] = tempObj;
-	  this.playmode = o["playmode"];
-		this.active = o["active"];
-		this.movement = o["tweened"];
-		this.easing = o["easing"];
-		this.target = o["target"];
-		this.targetmode = o["targetmode"];
-		this.useCurrent = o["useCurrent"];
-		this.duration = o["duration"];
-		this.enforce = o["enforce"];
-		this.value = o["value"];
+		this.dx = o["dx"];
+		this.dy = o["dy"];
+		this.cancelStep = o["cancelStep"];
+		this.enabled = o["enabled"];
+		this.stepMode = o["stepMode"];
+		this.pxPerStep = o["pxPerStep"];
 	};
-	behinstProto.setProgressTo = function (mark)
+	behinstProto.getSpeed = function ()
 	{
-    if (mark > 1.0) mark = 1.0;
-    if (mark < 0.0) mark = 0.0;
-    for (var i in this.tween_list) {
-      var inst = this.tween_list[i];
-      inst.lastKnownValue = 0;
-      inst.lastKnownValue2 = 0;
-      inst.state = 3;
-      inst.progress = mark * inst.duration;
-      var factor = inst.OnTick(0);
-      this.updateTween(inst, factor);
-    }
-  }
-	behinstProto.startTween = function (startMode)
+		return Math.sqrt(this.dx * this.dx + this.dy * this.dy);
+	};
+	behinstProto.getAngle = function ()
 	{
-    for (var i in this.tween_list) {
-      var inst = this.tween_list[i];
-      if (this.useCurrent) {
-        var init = this.parseCurrent(inst.tweened, "current");
-        var target = this.parseCurrent(inst.tweened, this.target);
-        inst.setInitial(init);
-        inst.setTarget(target);
-      }
-      if (startMode === 0) {
-        inst.progress = 0.000001;
-        inst.lastKnownValue = 0;
-        inst.lastKnownValue2 = 0;
-        inst.onStart = true;
-        inst.state = 1;
-      }
-      if (startMode === 1) {
-        inst.state = inst.lastState;
-      }
-      if ((startMode === 2) || (startMode === 4)) {
-        inst.progress = 0.000001;
-        inst.lastKnownValue = 0;
-        inst.lastKnownValue2 = 0;
-        inst.onStart = true;
-        if (startMode == 2) inst.state = 4; //state ping pong
-        if (startMode == 4) inst.state = 6; //state flip flop
-      }
-      if (startMode === 3) {
-        inst.progress = 0.000001;
-        inst.lastKnownValue = 0;
-        inst.lastKnownValue2 = 0;
-        inst.onStart = true;
-        inst.state = 5;
-      }
-    }
-  }
-	behinstProto.stopTween = function (stopMode)
+		return Math.atan2(this.dy, this.dx);
+	};
+	function sign(x)
 	{
-    for (var i in this.tween_list) {
-      var inst = this.tween_list[i];
-      if ((inst.state != 3) && (inst.state != 0)) //don't save paused/seek state
-        inst.lastState = inst.state;
-      if (stopMode === 1) inst.progress = 0.0;
-      if (stopMode === 2) inst.progress = inst.duration;
-      inst.state = 3;
-      var factor = inst.OnTick(0);
-      this.updateTween(inst, factor);
-    }
-  }
-	behinstProto.reverseTween = function(reverseMode)
+		if (x === 0)
+			return 0;
+		else if (x < 0)
+			return -1;
+		else
+			return 1;
+	};
+	behinstProto.step = function (x, y, trigmethod)
 	{
-    for (var i in this.tween_list) {
-      var inst = this.tween_list[i];
-      if (reverseMode === 1) {
-        inst.progress = inst.duration;
-        inst.lastKnownValue = 0;
-        inst.lastKnownValue2 = 0;
-        inst.onReverseStart = true;
-      }
-      inst.state = 2;
-    }
-  }
-	behinstProto.updateTween = function (inst, factor)
-	{
-    if (inst.tweened === 0) {
-      if (inst.enforce) {
-	      this.inst.x = inst.initialparam1 + (inst.targetparam1 - inst.initialparam1) * factor;
-        this.inst.y = inst.initialparam2 + (inst.targetparam2 - inst.initialparam2) * factor;
-      } else {
-        this.inst.x += ((inst.targetparam1 - inst.initialparam1) * factor) - inst.lastKnownValue;
-        this.inst.y += ((inst.targetparam2 - inst.initialparam2) * factor) - inst.lastKnownValue2;
-        inst.lastKnownValue = ((inst.targetparam1 - inst.initialparam1) * factor);
-        inst.lastKnownValue2 = ((inst.targetparam2 - inst.initialparam2) * factor);
-      }
-    } else if (inst.tweened === 1) {
-      if (inst.enforce) {
-  			this.inst.width = (inst.initialparam1 + ((inst.targetparam1 - inst.initialparam1) * (factor)));
-	   		this.inst.height = (inst.initialparam2 + ((inst.targetparam2 - inst.initialparam2) * (factor)));
-      } else {
-       	this.inst.width +=  ((inst.targetparam1 - inst.initialparam1) * factor) - inst.lastKnownValue;
-      	this.inst.height += ((inst.targetparam2 - inst.initialparam2) * factor) - inst.lastKnownValue2;
-        inst.lastKnownValue = ((inst.targetparam1 - inst.initialparam1) * factor);
-        inst.lastKnownValue2 = ((inst.targetparam2 - inst.initialparam2) * factor);
-      }
-    } else if (inst.tweened === 2) {
-      if (inst.enforce) {
-  			this.inst.width = (inst.initialparam1 + ((inst.targetparam1 - inst.initialparam1) * (factor)));
-      } else {
-      	this.inst.width += ((inst.targetparam1 - inst.initialparam1) * factor) - inst.lastKnownValue;
-        inst.lastKnownValue = ((inst.targetparam1 - inst.initialparam1) * factor);
-      }
-    } else if (inst.tweened === 3) {
-      if (inst.enforce) {
-	   		this.inst.height = (inst.initialparam2 + ((inst.targetparam2 - inst.initialparam2) * (factor)));
-      } else {
-      	this.inst.height += ((inst.targetparam2 - inst.initialparam2) * factor) - inst.lastKnownValue2;
-        inst.lastKnownValue2 = ((inst.targetparam2 - inst.initialparam2) * factor);
-      }
-    } else if (inst.tweened === 4) {
-      if (inst.enforce) {
-  		  var tangle = inst.initialparam1 + (inst.targetparam1 - inst.initialparam1) * factor;
-  		  this.inst.angle = cr.clamp_angle(cr.to_radians(tangle));
-      } else {
-  		  var tangle = ((inst.targetparam1 - inst.initialparam1) * factor) - inst.lastKnownValue;
-  		  this.inst.angle = cr.clamp_angle(this.inst.angle + cr.to_radians(tangle));
-        inst.lastKnownValue = (inst.targetparam1 - inst.initialparam1) * factor;
-      }
-    } else if (inst.tweened === 5) {
-      if (inst.enforce) {
-  		  this.inst.opacity = (inst.initialparam1 + (inst.targetparam1 - inst.initialparam1) * factor) / 100;
-      } else {
-  		  this.inst.opacity += (((inst.targetparam1 - inst.initialparam1) * factor) - inst.lastKnownValue) / 100;
-        inst.lastKnownValue = ((inst.targetparam1 - inst.initialparam1) * factor);
-      }
-    } else if (inst.tweened === 6) {
-      if (inst.enforce) {
-  		  this.value = (inst.initialparam1 + (inst.targetparam1 - inst.initialparam1) * factor);
-      } else {
-  		  this.value += (((inst.targetparam1 - inst.initialparam1) * factor) - inst.lastKnownValue);
-        inst.lastKnownValue = ((inst.targetparam1 - inst.initialparam1) * factor);
-      }
-    } else if (inst.tweened === 7) {
-      if (inst.enforce) {
-	      this.inst.x = inst.initialparam1 + (inst.targetparam1 - inst.initialparam1) * factor;
-      } else {
-        this.inst.x += ((inst.targetparam1 - inst.initialparam1) * factor) - inst.lastKnownValue;
-        inst.lastKnownValue = ((inst.targetparam1 - inst.initialparam1) * factor);
-      }
-    } else if (inst.tweened === 8) {
-      if (inst.enforce) {
-        this.inst.y = inst.initialparam2 + (inst.targetparam2 - inst.initialparam2) * factor;
-      } else {
-        this.inst.y += ((inst.targetparam2 - inst.initialparam2) * factor) - inst.lastKnownValue2;
-        inst.lastKnownValue2 = ((inst.targetparam2 - inst.initialparam2) * factor);
-      }
-    } else if (inst.tweened === 9) {
-      var scalex = inst.initialparam1 + (inst.targetparam1 - inst.initialparam1) * factor;
-      var scaley = inst.initialparam2 + (inst.targetparam2 - inst.initialparam2) * factor;
-      if (this.inst.width < 0) scalex = inst.initialparam1 + (inst.targetparam1 + inst.initialparam1) * -factor;
-      if (this.inst.height < 0)  scaley = inst.initialparam2 + (inst.targetparam2 + inst.initialparam2) * -factor;
-      if (inst.enforce) {
-        this.inst.width = this.inst.curFrame.width * scalex;
-        this.inst.height = this.inst.curFrame.height * scaley;
-      } else {
-        if (this.inst.width < 0) {
-      	  this.inst.width = scalex * (this.inst.width / (-1+inst.lastKnownValue));
-          inst.lastKnownValue = scalex + 1
-        } else {
-      	  this.inst.width = scalex * (this.inst.width / (1+inst.lastKnownValue));
-          inst.lastKnownValue = scalex - 1;
-        }
-        if (this.inst.height < 0) {
-          this.inst.height = scaley * (this.inst.height / (-1+inst.lastKnownValue2));
-          inst.lastKnownValue2 = scaley + 1
-        } else {
-          this.inst.height = scaley * (this.inst.height / (1+inst.lastKnownValue2));
-          inst.lastKnownValue2 = scaley - 1;
-        }
-      }
-    }
-    this.inst.set_bbox_changed();
-  }
+		if (x === 0 && y === 0)
+			return;
+		var startx = this.inst.x;
+		var starty = this.inst.y;
+		var sx, sy, prog;
+		var steps = Math.round(Math.sqrt(x * x + y * y) / this.pxPerStep);
+		if (steps === 0)
+			steps = 1;
+		var i;
+		for (i = 1; i <= steps; i++)
+		{
+			prog = i / steps;
+			this.inst.x = startx + x * prog;
+			this.inst.y = starty + y * prog;
+			this.inst.set_bbox_changed();
+			this.runtime.trigger(trigmethod, this.inst);
+			if (this.cancelStep === 1)
+			{
+				i--;
+				prog = i / steps;
+				this.inst.x = startx + x * prog;
+				this.inst.y = starty + y * prog;
+				this.inst.set_bbox_changed();
+				return;
+			}
+			else if (this.cancelStep === 2)
+			{
+				return;
+			}
+		}
+	};
 	behinstProto.tick = function ()
 	{
 		var dt = this.runtime.getDt(this.inst);
-    var inst = this.tween_list["default"];
-    if (inst.state !== 0) {
-      if (inst.onStart) {
-  			this.runtime.trigger(cr.behaviors.lunarray_LiteTween.prototype.cnds.OnStart, this.inst);
-        inst.onStart = false;
-      }
-      if (inst.onReverseStart) {
-  		  this.runtime.trigger(cr.behaviors.lunarray_LiteTween.prototype.cnds.OnReverseStart, this.inst);
-        inst.onReverseStart = false;
-      }
-      this.active = (inst.state == 1) || (inst.state == 2) || (inst.state == 4) || (inst.state == 5) || (inst.state == 6);
-      var factor = inst.OnTick(dt);
-      this.updateTween(inst, factor);
-      if (inst.onEnd) {
-  		  this.runtime.trigger(cr.behaviors.lunarray_LiteTween.prototype.cnds.OnEnd, this.inst);
-        inst.onEnd = false;
-      }
-      if (inst.onReverseEnd) {
-  		  this.runtime.trigger(cr.behaviors.lunarray_LiteTween.prototype.cnds.OnReverseEnd, this.inst);
-        inst.onReverseEnd = false;
-      }
-    }
+		var mx = this.dx * dt;
+		var my = this.dy * dt;
+		var i, steps;
+		if ((this.dx === 0 && this.dy === 0) || !this.enabled)
+			return;
+		this.cancelStep = 0;
+		if (this.stepMode === 0)		// none
+		{
+			this.inst.x += mx;
+			this.inst.y += my;
+		}
+		else if (this.stepMode === 1)	// linear
+		{
+			this.step(mx, my, cr.behaviors.custom.prototype.cnds.OnCMStep);
+		}
+		else if (this.stepMode === 2)	// horizontal then vertical
+		{
+			this.step(mx, 0, cr.behaviors.custom.prototype.cnds.OnCMHorizStep);
+			this.cancelStep = 0;
+			this.step(0, my, cr.behaviors.custom.prototype.cnds.OnCMVertStep);
+		}
+		else if (this.stepMode === 3)	// vertical then horizontal
+		{
+			this.step(0, my, cr.behaviors.custom.prototype.cnds.OnCMVertStep);
+			this.cancelStep = 0;
+			this.step(mx, 0, cr.behaviors.custom.prototype.cnds.OnCMHorizStep);
+		}
+		this.inst.set_bbox_changed();
 	};
-	behaviorProto.cnds = {};
-	var cnds = behaviorProto.cnds;
-	cnds.IsActive = function ()
+	function Cnds() {};
+	Cnds.prototype.IsMoving = function ()
 	{
-		return (this.tween_list["default"].state !== 0);
+		return this.dx != 0 || this.dy != 0;
 	};
-	cnds.IsReversing = function ()
+	Cnds.prototype.CompareSpeed = function (axis, cmp, s)
 	{
-		return (this.tween_list["default"].state == 2);
+		var speed;
+		switch (axis) {
+		case 0:		speed = this.getSpeed();	break;
+		case 1:		speed = this.dx;			break;
+		case 2:		speed = this.dy;			break;
+		}
+		return cr.do_cmp(speed, cmp, s);
 	};
-	cnds.CompareProgress = function (cmp, v)
+	Cnds.prototype.OnCMStep = function ()
 	{
-    var inst = this.tween_list["default"];
-		return cr.do_cmp((inst.progress / inst.duration), cmp, v);
+		return true;
 	};
-	cnds.OnThreshold = function (cmp, v)
+	Cnds.prototype.OnCMHorizStep = function ()
 	{
-    var inst = this.tween_list["default"];
-    this.threshold = (cr.do_cmp((inst.progress / inst.duration), cmp, v));
-    var ret = (this.oldthreshold != this.threshold) && (this.threshold);
-    if (ret) {
-      this.oldthreshold = this.threshold;
-    }
-		return ret;
+		return true;
 	};
-	cnds.OnStart = function ()
+	Cnds.prototype.OnCMVertStep = function ()
 	{
-    if (this.tween_list["default"] === undefined)
-      return false;
-    return this.tween_list["default"].onStart;
+		return true;
 	};
-	cnds.OnReverseStart = function ()
+	behaviorProto.cnds = new Cnds();
+	function Acts() {};
+	Acts.prototype.Stop = function ()
 	{
-    if (this.tween_list["default"] === undefined)
-      return false;
-    return this.tween_list["default"].onReverseStart;
+		this.dx = 0;
+		this.dy = 0;
 	};
-  cnds.OnEnd = function ()
+	Acts.prototype.Reverse = function (axis)
 	{
-    if (this.tween_list["default"] === undefined)
-      return false;
-    return this.tween_list["default"].onEnd;
+		switch (axis) {
+		case 0:
+			this.dx *= -1;
+			this.dy *= -1;
+			break;
+		case 1:
+			this.dx *= -1;
+			break;
+		case 2:
+			this.dy *= -1;
+			break;
+		}
 	};
-  cnds.OnReverseEnd = function ()
+	Acts.prototype.SetSpeed = function (axis, s)
 	{
-    if (this.tween_list["default"] === undefined)
-      return false;
-    return this.tween_list["default"].onReverseEnd;
+		var a;
+		switch (axis) {
+		case 0:
+			a = this.getAngle();
+			this.dx = Math.cos(a) * s;
+			this.dy = Math.sin(a) * s;
+			break;
+		case 1:
+			this.dx = s;
+			break;
+		case 2:
+			this.dy = s;
+			break;
+		}
 	};
-	behaviorProto.acts = {};
-	var acts = behaviorProto.acts;
-	acts.Start = function (startmode, current)
+	Acts.prototype.Accelerate = function (axis, acc)
 	{
-    this.threshold = false;
-    this.oldthreshold = false;
-    this.useCurrent = (current == 1);
-    this.startTween(startmode);
+		var dt = this.runtime.getDt(this.inst);
+		var ds = acc * dt;
+		var a;
+		switch (axis) {
+		case 0:
+			a = this.getAngle();
+			this.dx += Math.cos(a) * ds;
+			this.dy += Math.sin(a) * ds;
+			break;
+		case 1:
+			this.dx += ds;
+			break;
+		case 2:
+			this.dy += ds;
+			break;
+		}
 	};
-	acts.Stop = function (stopmode)
+	Acts.prototype.AccelerateAngle = function (acc, a_)
 	{
-    this.stopTween(stopmode);
+		var dt = this.runtime.getDt(this.inst);
+		var ds = acc * dt;
+		var a = cr.to_radians(a_);
+		this.dx += Math.cos(a) * ds;
+		this.dy += Math.sin(a) * ds;
 	};
-	acts.Reverse = function (revMode)
+	Acts.prototype.AcceleratePos = function (acc, x, y)
 	{
-    this.threshold = false;
-    this.oldthreshold = false;
-    this.reverseTween(revMode);
+		var dt = this.runtime.getDt(this.inst);
+		var ds = acc * dt;
+		var a = Math.atan2(y - this.inst.y, x - this.inst.x);
+		this.dx += Math.cos(a) * ds;
+		this.dy += Math.sin(a) * ds;
 	};
- 	acts.ProgressTo = function (progress)
+	Acts.prototype.SetAngleOfMotion = function (a_)
 	{
-    this.setProgressTo(progress);
+		var a = cr.to_radians(a_);
+		var s = this.getSpeed();
+		this.dx = Math.cos(a) * s;
+		this.dy = Math.sin(a) * s;
 	};
-	acts.SetDuration = function (x)
+	Acts.prototype.RotateAngleOfMotionClockwise = function (a_)
 	{
-    if (isNaN(x)) return;
-    if (x < 0) return;
-    if (this.tween_list["default"] === undefined) return;
-		this.tween_list["default"].duration = x;
+		var a = this.getAngle() + cr.to_radians(a_);
+		var s = this.getSpeed();
+		this.dx = Math.cos(a) * s;
+		this.dy = Math.sin(a) * s;
 	};
-	acts.SetEnforce = function (x)
+	Acts.prototype.RotateAngleOfMotionCounterClockwise = function (a_)
 	{
-    if (this.tween_list["default"] === undefined) return;
-		this.tween_list["default"].enforce = (x===1);
+		var a = this.getAngle() - cr.to_radians(a_);
+		var s = this.getSpeed();
+		this.dx = Math.cos(a) * s;
+		this.dy = Math.sin(a) * s;
 	};
-	acts.SetInitial = function (x)
+	Acts.prototype.StopStepping = function (mode)
 	{
-    if (this.tween_list["default"] === undefined) return;
-    var init = this.parseCurrent(this.tween_list["default"].tweened, x);
-		this.tween_list["default"].setInitial(init);
+		this.cancelStep = mode + 1;
 	};
-	acts.SetTarget = function (targettype, absrel, x)
+	Acts.prototype.PushOutSolid = function (mode)
 	{
-    if (this.tween_list["default"] === undefined) return;
-    if (isNaN(x)) return;
-    var inst = this.tween_list["default"];
-    var parsed = x + "";
-    this.targetmode = absrel;
-    var x1 = "";
-    var x2 = "";
-    if (absrel === 1) {
-      this.target = "relative(" + parsed + ")";
-      switch (targettype) {
-        case 0: x1 = (this.inst.x + x); x2 = inst.targetparam2; break;
-        case 1: x1 = inst.targetparam1; x2 = (this.inst.y + x); break;
-        case 2: x1 = "" + cr.to_degrees(this.inst.angle + cr.to_radians(x)); x2 = x1; break; //angle
-        case 3: x1 = "" + (this.inst.opacity*100) + x; x2 = x1; break; //opacity
-        case 4: x1 = (this.inst.width + x); x2 = inst.targetparam2; break; //width
-        case 5: x1 = inst.targetparam1; x2 = (this.inst.height + x); break; //height
-        case 6: x1 = x; x2 = x; break; //value
-        default:  break;
-      }
-      parsed = x1 + "," + x2;
-    } else {
-      switch (targettype) {
-        case 0: x1 = x; x2 = inst.targetparam2; break;
-        case 1: x1 = inst.targetparam1; x2 = x; break;
-        case 2: x1 = x; x2 = x; break; //angle
-        case 3: x1 = x; x2 = x; break; //opacity
-        case 4: x1 = x; x2 = inst.targetparam2; break; //width
-        case 5: x1 = inst.targetparam1; x2 = x; break; //height
-        case 6: x1 = x; x2 = x; break; //value
-        default:  break;
-      }
-      parsed = x1 + "," + x2;
-      this.target = parsed;
-    }
-    var init = this.parseCurrent(this.tween_list["default"].tweened, "current");
-    var targ = this.parseCurrent(this.tween_list["default"].tweened, parsed);
- 		inst.setInitial(init);
- 		inst.setTarget(targ);
+		var a, ux, uy;
+		switch (mode) {
+		case 0:
+			a = this.getAngle();
+			ux = Math.cos(a);
+			uy = Math.sin(a);
+			this.runtime.pushOutSolid(this.inst, -ux, -uy, Math.max(this.getSpeed() * 3, 100));
+			break;
+		case 1:
+			this.runtime.pushOutSolidNearest(this.inst);
+			break;
+		case 2:
+			this.runtime.pushOutSolid(this.inst, 0, -1, Math.max(Math.abs(this.dy) * 3, 100));
+			break;
+		case 3:
+			this.runtime.pushOutSolid(this.inst, 0, 1, Math.max(Math.abs(this.dy) * 3, 100));
+			break;
+		case 4:
+			this.runtime.pushOutSolid(this.inst, -1, 0, Math.max(Math.abs(this.dx) * 3, 100));
+			break;
+		case 5:
+			this.runtime.pushOutSolid(this.inst, 1, 0, Math.max(Math.abs(this.dx) * 3, 100));
+			break;
+		}
 	};
-	acts.SetTweenedProperty = function (x)
+	Acts.prototype.PushOutSolidAngle = function (a)
 	{
-    if (this.tween_list["default"] === undefined) return;
-		this.tween_list["default"].tweened = x;
+		a = cr.to_radians(a);
+		var ux = Math.cos(a);
+		var uy = Math.sin(a);
+		this.runtime.pushOutSolid(this.inst, ux, uy, Math.max(this.getSpeed() * 3, 100));
 	};
-	acts.SetEasing = function (x)
+	Acts.prototype.SetEnabled = function (en)
 	{
-    if (this.tween_list["default"] === undefined) return;
-		this.tween_list["default"].easefunc = x;
+		this.enabled = (en === 1);
 	};
- 	acts.SetEasingParam = function (x, a, p, t, s)
+	behaviorProto.acts = new Acts();
+	function Exps() {};
+	Exps.prototype.Speed = function (ret)
 	{
-    if (this.tween_list["default"] === undefined) return;
-    this.tween_list["default"].easingparam[x].optimized = false;
-		this.tween_list["default"].easingparam[x].a = a;
-		this.tween_list["default"].easingparam[x].p = p;
-		this.tween_list["default"].easingparam[x].t = t;
-		this.tween_list["default"].easingparam[x].s = s;
+		ret.set_float(this.getSpeed());
 	};
- 	acts.ResetEasingParam = function ()
+	Exps.prototype.MovingAngle = function (ret)
 	{
-    if (this.tween_list["default"] === undefined) return;
-    this.tween_list["default"].optimized = true;
+		ret.set_float(cr.to_degrees(this.getAngle()));
 	};
- 	acts.SetValue = function (x)
+	Exps.prototype.dx = function (ret)
 	{
-    var inst = this.tween_list["default"];
-		this.value = x;
-    if (inst.tweened === 6)
-      inst.setInitial( this.parseCurrent(inst.tweened, "current") );
+		ret.set_float(this.dx);
 	};
-	acts.SetParameter = function (tweened, easefunction, target, duration, enforce)
+	Exps.prototype.dy = function (ret)
 	{
-    if (this.tween_list["default"] === undefined) {
-      this.addToTweenList("default", tweened, easefunction, initial, target, duration, enforce, 0);
-    } else {
-      var inst = this.tween_list["default"];
-      inst.tweened = tweened;
-  		inst.easefunc = easefunction;
-      inst.setInitial( this.parseCurrent(tweened, "current") );
-      inst.setTarget( this.parseCurrent(tweened, target) );
-      inst.duration = duration;
-      inst.enforce = (enforce === 1);
-    }
+		ret.set_float(this.dy);
 	};
-	behaviorProto.exps = {};
-	var exps = behaviorProto.exps;
-	exps.State = function (ret)
-	{
-    var parsed = "N/A";
-    switch (this.tween_list["default"].state) {
-      case 0: parsed = "paused"; break;
-      case 1: parsed = "playing"; break;
-      case 2: parsed = "reversing"; break;
-      case 3: parsed = "seeking"; break;
-      default:  break;
-    }
-    ret.set_string(parsed);
-	};
-	exps.Progress = function (ret)
-	{
-    var progress = this.tween_list["default"].progress/this.tween_list["default"].duration;
-    ret.set_float(progress);
-	};
-	exps.Duration = function (ret)
-	{
-    ret.set_float(this.tween_list["default"].duration);
-	};
-	exps.Target = function (ret)
-	{
-    var inst = this.tween_list["default"];
-    var parsed = "N/A";
-    switch (inst.tweened) {
-      case 0: parsed = inst.targetparam1; break;
-      case 1: parsed = inst.targetparam2; break;
-      case 2: parsed = inst.targetparam1; break;
-      case 3: parsed = inst.targetparam1; break;
-      case 4: parsed = inst.targetparam1; break;
-      case 5: parsed = inst.targetparam2; break;
-      case 6: parsed = inst.targetparam1; break;
-      default:  break;
-    }
-    ret.set_float(parsed);
-	};
-	exps.Value = function (ret)
-	{
-    var tval = this.value;
-    ret.set_float(tval);
-	};
-	exps.Tween = function (ret, a_, b_, x_, easefunc_)
-	{
-    var currX = (x_>1.0?1.0:x_);
-    var factor = easeFunc(easefunc_, currX<0.0?0.0:currX, 0.0, 1.0, 1.0, false, false);
-    ret.set_float(a_ + factor * (b_-a_));
-	};
+	behaviorProto.exps = new Exps();
 }());
 ;
 ;
@@ -21837,22 +24388,26 @@ cr.behaviors.solid = function(runtime)
 	behaviorProto.acts = new Acts();
 }());
 cr.getObjectRefTable = function () { return [
+	cr.plugins_.Browser,
 	cr.plugins_.Button,
-	cr.plugins_.Mouse,
 	cr.plugins_.Function,
+	cr.plugins_.Mouse,
 	cr.plugins_.Keyboard,
-	cr.plugins_.Photon,
-	cr.plugins_.TextBox,
-	cr.plugins_.Particles,
-	cr.plugins_.TiledBg,
-	cr.plugins_.Text,
 	cr.plugins_.Sprite,
+	cr.plugins_.TiledBg,
+	cr.plugins_.Touch,
+	cr.plugins_.Photon,
+	cr.plugins_.Particles,
+	cr.plugins_.Text,
+	cr.plugins_.TextBox,
 	cr.behaviors.EightDir,
 	cr.behaviors.Timer,
-	cr.behaviors.lunarray_LiteTween,
 	cr.behaviors.solid,
 	cr.behaviors.Fade,
-	cr.behaviors.Bullet,
+	cr.behaviors.custom,
+	cr.behaviors.LOS,
+	cr.behaviors.Pathfinding,
+	cr.behaviors.DragnDrop,
 	cr.system_object.prototype.cnds.IsGroupActive,
 	cr.system_object.prototype.cnds.OnLayoutStart,
 	cr.plugins_.Sprite.prototype.acts.Destroy,
@@ -21863,60 +24418,79 @@ cr.getObjectRefTable = function () { return [
 	cr.plugins_.Photon.prototype.cnds.isJoinedToRoom,
 	cr.plugins_.Photon.prototype.acts.joinRandomOrCreateRoom,
 	cr.plugins_.Photon.prototype.cnds.onJoinedLobby,
-	cr.plugins_.Photon.prototype.cnds.onActorLeave,
-	cr.plugins_.Sprite.prototype.cnds.CompareInstanceVar,
-	cr.plugins_.Photon.prototype.exps.ActorNr,
-	cr.plugins_.Photon.prototype.cnds.onJoinRoom,
-	cr.plugins_.Photon.prototype.acts.raiseEvent,
-	cr.plugins_.Photon.prototype.exps.MyActorNr,
 	cr.plugins_.Photon.prototype.cnds.onActorJoin,
+	cr.plugins_.Photon.prototype.acts.raiseEvent,
+	cr.plugins_.Sprite.prototype.exps.X,
+	cr.plugins_.Sprite.prototype.exps.Y,
+	cr.plugins_.Sprite.prototype.exps.Angle,
+	cr.system_object.prototype.exps.str,
+	cr.plugins_.Photon.prototype.exps.ActorNr,
 	cr.system_object.prototype.acts.CreateObject,
 	cr.system_object.prototype.exps.layoutwidth,
 	cr.system_object.prototype.exps.layoutheight,
 	cr.plugins_.Sprite.prototype.acts.SetInstanceVar,
-	cr.system_object.prototype.acts.ScrollToObject,
-	cr.system_object.prototype.acts.Scroll,
-	cr.plugins_.Mouse.prototype.exps.X,
-	cr.plugins_.Sprite.prototype.exps.X,
-	cr.plugins_.Mouse.prototype.exps.Y,
-	cr.plugins_.Sprite.prototype.exps.Y,
-	cr.system_object.prototype.cnds.Every,
+	cr.plugins_.Photon.prototype.cnds.onActorLeave,
+	cr.plugins_.Sprite.prototype.cnds.CompareInstanceVar,
 	cr.system_object.prototype.cnds.ForEach,
-	cr.system_object.prototype.acts.AddVar,
-	cr.system_object.prototype.cnds.CompareVar,
-	cr.system_object.prototype.cnds.Repeat,
-	cr.system_object.prototype.exps.originalwindowwidth,
-	cr.system_object.prototype.exps.random,
-	cr.system_object.prototype.exps.originalwindowheight,
-	cr.plugins_.Sprite.prototype.acts.SetTowardPosition,
-	cr.behaviors.EightDir.prototype.acts.SetEnabled,
-	cr.plugins_.Mouse.prototype.cnds.OnClick,
-	cr.plugins_.Sprite.prototype.cnds.IsBoolInstanceVarSet,
-	cr.plugins_.Sprite.prototype.acts.SetBoolInstanceVar,
-	cr.behaviors.Timer.prototype.acts.StartTimer,
-	cr.plugins_.Keyboard.prototype.cnds.IsKeyDown,
-	cr.behaviors.EightDir.prototype.acts.SimulateControl,
-	cr.plugins_.Sprite.prototype.cnds.OnCollision,
-	cr.plugins_.Function.prototype.acts.CallFunction,
 	cr.plugins_.Photon.prototype.cnds.onEvent,
-	cr.plugins_.Sprite.prototype.exps.Angle,
-	cr.system_object.prototype.exps.str,
-	cr.behaviors.Timer.prototype.cnds.OnTimer,
-	cr.plugins_.Function.prototype.cnds.OnFunction,
-	cr.plugins_.Sprite.prototype.acts.SubInstanceVar,
-	cr.plugins_.Function.prototype.exps.Param,
-	cr.plugins_.Sprite.prototype.acts.SetPos,
-	cr.system_object.prototype.exps.lerp,
-	cr.plugins_.Sprite.prototype.acts.SetAngle,
-	cr.system_object.prototype.exps.anglerotate,
 	cr.system_object.prototype.exps["int"],
 	cr.system_object.prototype.exps.tokenat,
 	cr.plugins_.Photon.prototype.exps.EventData,
+	cr.plugins_.Sprite.prototype.acts.SetPos,
+	cr.plugins_.Sprite.prototype.acts.SetAngle,
+	cr.plugins_.Photon.prototype.exps.MyActorNr,
+	cr.system_object.prototype.cnds.Every,
+	cr.system_object.prototype.acts.AddVar,
 	cr.system_object.prototype.cnds.Compare,
+	cr.system_object.prototype.exps.choose,
+	cr.system_object.prototype.exps.originalwindowwidth,
+	cr.system_object.prototype.exps.scrolly,
+	cr.system_object.prototype.exps.windowheight,
+	cr.plugins_.Sprite.prototype.exps.IID,
+	cr.plugins_.Sprite.prototype.exps.Count,
+	cr.behaviors.EightDir.prototype.acts.SetEnabled,
+	cr.plugins_.Keyboard.prototype.cnds.IsKeyDown,
+	cr.behaviors.EightDir.prototype.acts.SimulateControl,
+	cr.behaviors.DragnDrop.prototype.cnds.IsDragging,
+	cr.plugins_.Sprite.prototype.acts.SetPosToObject,
+	cr.system_object.prototype.exps.cos,
+	cr.system_object.prototype.exps.angle,
+	cr.system_object.prototype.exps.sin,
+	cr.plugins_.Sprite.prototype.cnds.IsBoolInstanceVarSet,
+	cr.system_object.prototype.cnds.IsMobile,
+	cr.system_object.prototype.acts.SetLayerVisible,
+	cr.system_object.prototype.cnds.Else,
+	cr.plugins_.Sprite.prototype.acts.SetTowardPosition,
+	cr.plugins_.Mouse.prototype.exps.X,
+	cr.plugins_.Mouse.prototype.exps.Y,
+	cr.plugins_.Mouse.prototype.cnds.OnClick,
+	cr.plugins_.Function.prototype.acts.CallFunction,
+	cr.plugins_.Sprite.prototype.acts.SetBoolInstanceVar,
+	cr.behaviors.Timer.prototype.acts.StartTimer,
+	cr.plugins_.Touch.prototype.cnds.OnTapGesture,
+	cr.plugins_.Touch.prototype.cnds.HasNthTouch,
+	cr.plugins_.Touch.prototype.exps.TouchCount,
+	cr.plugins_.Touch.prototype.exps.X,
+	cr.plugins_.Touch.prototype.exps.Y,
+	cr.plugins_.Function.prototype.cnds.OnFunction,
+	cr.plugins_.Sprite.prototype.exps.ImagePointX,
+	cr.plugins_.Sprite.prototype.exps.ImagePointY,
+	cr.behaviors.EightDir.prototype.exps.MovingAngle,
+	cr.behaviors.EightDir.prototype.exps.Speed,
+	cr.plugins_.Sprite.prototype.cnds.OnCollision,
+	cr.system_object.prototype.exps.originalwindowheight,
+	cr.behaviors.Timer.prototype.cnds.OnTimer,
+	cr.plugins_.Sprite.prototype.acts.SubInstanceVar,
+	cr.plugins_.Function.prototype.exps.Param,
+	cr.system_object.prototype.exps.lerp,
+	cr.system_object.prototype.acts.ScrollToObject,
+	cr.system_object.prototype.acts.Scroll,
+	cr.system_object.prototype.exps.anglerotate,
+	cr.behaviors.Pathfinding.prototype.acts.FindPath,
 	cr.system_object.prototype.exps["float"],
+	cr.behaviors.custom.prototype.acts.SetSpeed,
 	cr.plugins_.Sprite.prototype.acts.Spawn,
 	cr.plugins_.Particles.prototype.acts.SetInitSpeed,
-	cr.behaviors.EightDir.prototype.exps.Speed,
 	cr.plugins_.Particles.prototype.exps.InitSpeed,
 	cr.plugins_.Sprite.prototype.cnds.OnDestroyed,
 	cr.behaviors.Fade.prototype.acts.StartFade,
@@ -21926,6 +24500,8 @@ cr.getObjectRefTable = function () { return [
 	cr.plugins_.Sprite.prototype.acts.MoveToBottom,
 	cr.plugins_.Text.prototype.acts.SetText,
 	cr.plugins_.Photon.prototype.exps.ActorNameByNr,
+	cr.plugins_.Sprite.prototype.acts.SetEffectParam,
+	cr.plugins_.Sprite.prototype.acts.AddInstanceVar,
 	cr.plugins_.Sprite.prototype.acts.SetAnim,
 	cr.plugins_.Sprite.prototype.acts.SetCollisions,
 	cr.plugins_.Sprite.prototype.acts.SetVisible,
@@ -21935,7 +24511,13 @@ cr.getObjectRefTable = function () { return [
 	cr.plugins_.Sprite.prototype.exps.Height,
 	cr.plugins_.Sprite.prototype.cnds.OnCreated,
 	cr.plugins_.Sprite.prototype.cnds.OnAnyAnimFinished,
+	cr.system_object.prototype.cnds.Repeat,
 	cr.plugins_.Text.prototype.exps.Text,
+	cr.plugins_.Sprite.prototype.cnds.IsAnimPlaying,
+	cr.behaviors.Pathfinding.prototype.cnds.OnPathFound,
+	cr.behaviors.Pathfinding.prototype.acts.StartMoving,
+	cr.behaviors.LOS.prototype.acts.AddObstacle,
+	cr.behaviors.LOS.prototype.cnds.HasLOSToObject,
 	cr.plugins_.Photon.prototype.exps.StateString,
 	cr.plugins_.Button.prototype.cnds.OnClicked,
 	cr.system_object.prototype.acts.GoToLayout,

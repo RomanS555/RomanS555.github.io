@@ -1,5 +1,5 @@
 ﻿{
-	"version": 1732012359,
+	"version": 1732062046,
 	"fileList": [
 		"data.js",
 		"c2runtime.js",
@@ -18,15 +18,20 @@
 		"images/sprite7-sheet0.png",
 		"images/sprite7-sheet1.png",
 		"images/sprite7-sheet2.png",
-		"images/sprite8-sheet0.png",
+		"images/zombu-sheet0.png",
 		"images/улицанормальная-sheet0.png",
 		"images/улицанормальная-sheet1.png",
+		"images/penisi-sheet0.png",
+		"images/sprite9-sheet0.png",
+		"images/sprite10-sheet0.png",
 		"icon-16.png",
 		"icon-32.png",
 		"icon-114.png",
 		"icon-128.png",
 		"icon-256.png",
 		"loading-logo.png",
-		"Photon-Javascript_SDK.min.js"
+		"not the joseph toster.pdn",
+		"Photon-Javascript_SDK.min.js",
+		"pathfind.js"
 	]
 }
